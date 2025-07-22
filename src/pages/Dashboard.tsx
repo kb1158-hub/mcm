@@ -70,11 +70,20 @@ const Dashboard: React.FC = () => {
       
     } catch (error) {
       console.error('Failed to send test notification:', error);
-      toast({
-        title: "Notification Failed",
-        description: `Failed to send test notification: ${error.message}`,
-        variant: "destructive",
-      });
+      
+      if (error.message === 'Notification permission not granted') {
+        toast({
+          title: "Notification Permission Required",
+          description: "Please enable browser notifications by clicking the bell icon in the header to access Notification Settings.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Notification Failed",
+          description: `Failed to send test notification: ${error.message}`,
+          variant: "destructive",
+        });
+      }
     }
   };
 
