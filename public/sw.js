@@ -1,4 +1,5 @@
 // MCM Alerts Service Worker
+
 const CACHE_NAME = 'mcm-alerts-v1';
 const urlsToCache = [
   '/',
@@ -19,18 +20,23 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// Fetch event - serve cached resources
+// Activate event - cleanup old caches and take control immediately
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.map(key => {
+        if (key !== CACHE_NAME) return caches.delete(key);
+      }))
+    )
+  );
+  self.clients.claim();
+});
+
+// Fetch event - serve cached resources, fallback to network
 self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
-      .then(response => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
-      }
-    )
+      .then(response => response || fetch(event.request))
   );
 });
 
@@ -71,19 +77,22 @@ self.addEventListener('notificationclick', event => {
   
   event.notification.close();
   
+  let targetUrl = '/';
+  if (event.notification.data && event.notification.data.url) {
+    targetUrl = event.notification.data.url;
+  }
+
   if (event.action === 'view' || !event.action) {
     event.waitUntil(
       clients.matchAll({ type: 'window', includeUncontrolled: true })
         .then(clientList => {
-          // Check if there is already a window/tab open
           for (const client of clientList) {
-            if (client.url === '/' && 'focus' in client) {
+            if (client.url === targetUrl && 'focus' in client) {
               return client.focus();
             }
           }
-          // If not, open a new window/tab
           if (clients.openWindow) {
-            return clients.openWindow('/');
+            return clients.openWindow(targetUrl);
           }
         })
     );
