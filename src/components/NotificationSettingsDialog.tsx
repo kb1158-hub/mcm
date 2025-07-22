@@ -25,40 +25,58 @@ const NotificationSettingsDialog: React.FC = () => {
   const handleNotificationToggle = async (enabled: boolean) => {
     if (enabled) {
       try {
+        // Always show browser permission dialog
         const permission = await Notification.requestPermission();
         setPermission(permission);
         setNotificationsEnabled(permission === 'granted');
         
         if (permission === 'granted') {
-          toast.success('✅ Browser notifications enabled!');
+          toast.success('✅ Notifications enabled successfully!');
           
           // Send test notification
           new Notification('MCM Alerts', {
-            body: 'Notifications are now enabled! 🔔',
+            body: 'Great! You will now receive notifications from MCM Alerts 🔔',
             icon: '/mcm-logo-192.png',
-            tag: 'welcome'
+            tag: 'welcome',
+            requireInteraction: false
           });
+          
+          // Auto-close welcome notification
+          setTimeout(() => {
+            // Welcome notification will auto-close
+          }, 3000);
+          
         } else {
-          toast.error('❌ Notification permission denied');
+          toast.error('❌ Please click "Allow" in the browser dialog to enable notifications');
         }
       } catch (error) {
         console.error('Error requesting notification permission:', error);
-        toast.error('Failed to enable notifications');
+        toast.error('Failed to request notification permission. Please try again.');
       }
     } else {
       setNotificationsEnabled(false);
-      toast.success('Notifications disabled');
+      toast.success('Notifications have been disabled');
     }
   };
 
   // Test notification
   const sendTestNotification = () => {
     if (Notification.permission === 'granted') {
-      new Notification('Test Notification', {
-        body: 'This is a test notification from MCM Alerts! 🚀',
+      const notification = new Notification('🔔 Test Notification', {
+        body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
         icon: '/mcm-logo-192.png',
-        tag: 'test'
+        tag: 'test',
+        requireInteraction: false
       });
+      
+      // Auto-close test notification
+      setTimeout(() => {
+        try {
+          notification.close();
+        } catch (e) {
+          // Notification might already be closed
+        }
+      }, 5000);
       
       if (soundEnabled) {
         // Simple beep sound
@@ -77,9 +95,9 @@ const NotificationSettingsDialog: React.FC = () => {
         oscillator.stop(audioContext.currentTime + 0.3);
       }
       
-      toast.success('✅ Test notification sent!');
+      toast.success('✅ Test notification sent successfully!');
     } else {
-      toast.error('Please enable notifications first');
+      toast.error('❌ Please enable notifications first by toggling the switch above');
     }
   };
 

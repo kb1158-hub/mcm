@@ -49,17 +49,15 @@ const Dashboard: React.FC = () => {
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     try {
-      // Auto-enable notifications if not already enabled
-      if (Notification.permission !== 'granted') {
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          toast({
-            title: "Enable Notifications",
-            description: "Please allow notifications in your browser to receive alerts",
-            variant: "destructive",
-          });
-          return;
-        }
+      // Always request permission first to show browser dialog
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast({
+          title: "Notifications Blocked",
+          description: "Please click 'Allow' in the browser dialog to enable notifications",
+          variant: "destructive",
+        });
+        return;
       }
 
       // Send simple browser notification
@@ -77,23 +75,7 @@ const Dashboard: React.FC = () => {
       });
 
       // Play sound
-      const audio = new Audio();
-      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
-      
-      // Simple beep sound
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
-      oscillator.type = 'sine';
-      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.5);
+      await playNotificationSound(priority);
 
       // Store in database
       await fetch('/api/notifications', {
@@ -108,11 +90,17 @@ const Dashboard: React.FC = () => {
       });
 
       // Auto-close notification after delay
-      setTimeout(() => notification.close(), priority === 'high' ? 10000 : 5000);
+      setTimeout(() => {
+        try {
+          notification.close();
+        } catch (e) {
+          // Notification might already be closed
+        }
+      }, priority === 'high' ? 10000 : 5000);
 
       toast({
         title: "✅ Notification Sent!",
-        description: `${priority} priority notification with sound`,
+        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully!`,
       });
 
       // Refresh notifications list
@@ -121,10 +109,41 @@ const Dashboard: React.FC = () => {
     } catch (error) {
       console.error('Failed to send test notification:', error);
       toast({
-        title: "❌ Notification Failed",
-        description: "Please check your browser settings and try again",
+        title: "Notification Failed",
+        description: error.message || "Please allow notifications when prompted by your browser",
         variant: "destructive",
       });
+    }
+  };
+
+  const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
+    try {
+      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
+      const duration = priority === 'high' ? 1.0 : 0.5;
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      // Resume audio context if suspended (required for mobile)
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+      
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      oscillator.type = 'sine';
+      
+      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration);
+    } catch (error) {
+      console.warn('Could not play notification sound:', error);
     }
   };
 
