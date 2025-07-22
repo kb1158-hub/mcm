@@ -5,6 +5,14 @@ export class PushNotificationService {
    * Initializes and registers the service worker for push notifications.
    */
   async initialize() {
+    // Check if running in StackBlitz environment where Service Workers are not supported
+    if (window.location.hostname.includes('stackblitz') || 
+        window.location.hostname.includes('webcontainer') ||
+        window.location.hostname.includes('localhost')) {
+      console.warn('Service Workers are not supported in this environment. Push notifications will use fallback methods.');
+      return;
+    }
+
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       try {
         this.registration = await navigator.serviceWorker.register('/service-worker.js', {
