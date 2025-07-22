@@ -5,8 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
+import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
-import { Bell, LogOut, Activity, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { LogOut, Copy, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const Dashboard: React.FC = () => {
   const { logout } = useAuth();
@@ -33,76 +35,50 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const enableNotifications = async () => {
-    const permission = await pushService.requestPermission();
-    if (permission) {
-      await pushService.subscribe();
-      setNotificationsEnabled(true);
-      toast({
-        title: "Notifications Enabled",
-        description: "Push notifications have been enabled successfully",
-      });
-    } else {
-      toast({
-        title: "Permission Denied",
-        description: "Please enable notifications in your browser settings",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const sendTestNotification = async () => {
+  const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     if (notificationsEnabled) {
       await pushService.sendTestNotification();
       toast({
         title: "Test Notification Sent",
-        description: "Check your browser for the notification",
+        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`,
       });
     } else {
-      toast({
-        title: "Notifications Disabled",
-        description: "Please enable notifications first",
-        variant: "destructive",
-      });
+      const permission = await pushService.requestPermission();
+      if (permission) {
+        await pushService.subscribe();
+        setNotificationsEnabled(true);
+        await pushService.sendTestNotification();
+        toast({
+          title: "Notifications Enabled & Test Sent",
+          description: "Push notifications enabled and test notification sent",
+        });
+      }
     }
   };
 
-  const mockAlerts = [
-    { id: 1, title: "Website Down", description: "example.com is not responding", status: "critical", time: "2 minutes ago" },
-    { id: 2, title: "Server Load High", description: "CPU usage above 90%", status: "warning", time: "15 minutes ago" },
-    { id: 3, title: "Service Restored", description: "API service back online", status: "resolved", time: "1 hour ago" },
-    { id: 4, title: "Database Connected", description: "Connection established successfully", status: "info", time: "2 hours ago" },
-  ];
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'critical': return <AlertTriangle className="h-4 w-4" />;
-      case 'warning': return <Clock className="h-4 w-4" />;
-      case 'resolved': return <CheckCircle className="h-4 w-4" />;
-      default: return <Activity className="h-4 w-4" />;
-    }
+  const copyApiUrl = () => {
+    const apiUrl = "https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications";
+    navigator.clipboard.writeText(apiUrl);
+    toast({
+      title: "Copied!",
+      description: "API URL copied to clipboard",
+    });
   };
 
-  const getStatusVariant = (status: string) => {
-    switch (status) {
-      case 'critical': return 'destructive';
-      case 'warning': return 'secondary';
-      case 'resolved': return 'default';
-      default: return 'outline';
-    }
-  };
+  const examplePayload = `{
+  "type": "site_down",
+  "title": "Site Down Alert", 
+  "message": "example.com is not responding",
+  "site": "example.com"
+}`;
 
   return (
     <div className="min-h-screen bg-background">
-      <Header showSignIn={false} />
+      <Header />
       
       <div className="container mx-auto px-6 py-8">
         {/* Header with Logout */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-muted-foreground">Monitor your alerts and system status</p>
-          </div>
+        <div className="flex items-center justify-end mb-8">
           <Button 
             onClick={handleLogout}
             variant="outline"
@@ -113,119 +89,183 @@ const Dashboard: React.FC = () => {
           </Button>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Alerts</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-destructive" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">2</div>
-              <p className="text-xs text-muted-foreground">+1 from last hour</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Services Monitored</CardTitle>
-              <Activity className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">12</div>
-              <p className="text-xs text-muted-foreground">All systems</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Uptime</CardTitle>
-              <CheckCircle className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">99.9%</div>
-              <p className="text-xs text-muted-foreground">Last 30 days</p>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Response Time</CardTitle>
-              <Clock className="h-4 w-4 text-accent" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">245ms</div>
-              <p className="text-xs text-muted-foreground">Average</p>
-            </CardContent>
-          </Card>
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Topic Management */}
+            <TopicManagement />
 
-        {/* Notification Settings */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Bell className="h-5 w-5" />
-              <span>Push Notifications</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Enable Push Notifications</p>
-                <p className="text-sm text-muted-foreground">
-                  Receive real-time alerts even when the browser is closed
+            {/* API Integration */}
+            <Card>
+              <CardHeader>
+                <CardTitle>API Integration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-muted-foreground">
+                  Use this endpoint to trigger notifications from Postman:
                 </p>
-              </div>
-              <Button
-                onClick={enableNotifications}
-                disabled={notificationsEnabled}
-                variant={notificationsEnabled ? "outline" : "default"}
-              >
-                {notificationsEnabled ? "Enabled" : "Enable"}
-              </Button>
-            </div>
-            
-            {notificationsEnabled && (
-              <Button 
-                onClick={sendTestNotification}
-                variant="outline"
-                className="w-full sm:w-auto"
-              >
-                Send Test Notification
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Alerts */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Alerts</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockAlerts.map((alert) => (
-                <div key={alert.id} className="flex items-center justify-between p-4 border border-border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      {getStatusIcon(alert.status)}
-                      <div>
-                        <p className="font-medium">{alert.title}</p>
-                        <p className="text-sm text-muted-foreground">{alert.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge variant={getStatusVariant(alert.status) as any}>
-                      {alert.status}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">{alert.time}</span>
+                
+                <div className="bg-muted p-4 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <code className="text-sm font-mono">
+                      https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications
+                    </code>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={copyApiUrl}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+
+                <div className="text-sm text-muted-foreground mb-4">
+                  <p><strong>Method:</strong> POST | <strong>Auth:</strong> None Required</p>
+                </div>
+
+                <div>
+                  <h4 className="font-medium mb-2">Example payload:</h4>
+                  <div className="relative">
+                    <pre className="bg-muted p-4 rounded-lg text-sm overflow-x-auto">
+                      <code>{examplePayload}</code>
+                    </pre>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={() => navigator.clipboard.writeText(examplePayload)}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <Link to="/api-docs">
+                  <Button variant="outline" className="flex items-center space-x-2">
+                    <ExternalLink className="h-4 w-4" />
+                    <span>View Full API Documentation</span>
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Column */}
+          <div className="space-y-8">
+            {/* Recent Notifications */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+                <CardTitle>Recent Notifications</CardTitle>
+                <Button variant="ghost" size="sm" className="text-accent hover:text-accent">
+                  View All
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">No notifications yet</p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Total notifications today: <strong>0</strong>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* System Status */}
+            <Card>
+              <CardHeader>
+                <CardTitle>System Status</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Monitoring Service</span>
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    Online
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Notifications</span>
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    Active
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Database</span>
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    Healthy
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Notification Features */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <span>⚡</span>
+                  <span>Notification Features</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex items-center space-x-2 text-sm">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span>Visual flash cards (in-app toasts)</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span>Priority-based notification sounds</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span>Browser push notifications</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span>WhatsApp-like experience</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Test Notification */}
+            <Card>
+              <CardContent className="pt-6">
+                <Button 
+                  onClick={() => sendTestNotification('high')}
+                  className="w-full mb-4 bg-primary hover:bg-primary/90"
+                >
+                  🔔 Test Notification
+                </Button>
+                
+                <div className="grid grid-cols-3 gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => sendTestNotification('low')}
+                    className="text-xs"
+                  >
+                    Low
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => sendTestNotification('medium')}
+                    className="text-xs"
+                  >
+                    Medium
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    onClick={() => sendTestNotification('high')}
+                    className="text-xs"
+                  >
+                    High
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
   );
