@@ -48,35 +48,27 @@ const Dashboard: React.FC = () => {
   };
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
-    if (notificationsEnabled) {
+    try {
+      // Always try to send the notification
       await pushService.sendTestNotification(priority);
+      
       toast({
         title: "Test Notification Sent",
-        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`
+        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`,
       });
       
-      // Log notification in database and reload recent notifications
-      await addNotification({
-        title: `Test Notification (${priority})`,
-        body: `Test notification of ${priority} priority sent at ${new Date().toLocaleTimeString()}.`
-      });
-      await loadRecentNotifications();
-    } else {
-      const permission = await pushService.requestPermission();
-      if (permission) {
-        await pushService.subscribe();
-        setNotificationsEnabled(true);
-        await pushService.sendTestNotification(priority);
-        toast({
-          title: "Notifications Enabled & Test Sent",
-          description: "Push notifications enabled and test notification sent"
-        });
-        await addNotification({
-          title: `Test Notification (${priority})`,
-          body: `Test notification of ${priority} priority sent at ${new Date().toLocaleTimeString()}.`
-        });
+      // Reload recent notifications after a short delay
+      setTimeout(async () => {
         await loadRecentNotifications();
-      }
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Failed to send test notification:', error);
+      toast({
+        title: "Notification Failed",
+        description: "Failed to send test notification. Please check permissions.",
+        variant: "destructive",
+      });
     }
   };
 
