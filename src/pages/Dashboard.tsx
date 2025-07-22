@@ -9,38 +9,36 @@ import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
 import { LogOut, Copy, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
-
 const Dashboard: React.FC = () => {
-  const { logout } = useAuth();
-  const { toast } = useToast();
+  const {
+    logout
+  } = useAuth();
+  const {
+    toast
+  } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-
   useEffect(() => {
     initializePushNotifications();
   }, []);
-
   const initializePushNotifications = async () => {
     await pushService.initialize();
-    
     if ('Notification' in window) {
       setNotificationsEnabled(Notification.permission === 'granted');
     }
   };
-
   const handleLogout = () => {
     logout();
     toast({
       title: "Logged Out",
-      description: "You have been successfully logged out",
+      description: "You have been successfully logged out"
     });
   };
-
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     if (notificationsEnabled) {
       await pushService.sendTestNotification();
       toast({
         title: "Test Notification Sent",
-        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`,
+        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`
       });
     } else {
       const permission = await pushService.requestPermission();
@@ -50,40 +48,32 @@ const Dashboard: React.FC = () => {
         await pushService.sendTestNotification();
         toast({
           title: "Notifications Enabled & Test Sent",
-          description: "Push notifications enabled and test notification sent",
+          description: "Push notifications enabled and test notification sent"
         });
       }
     }
   };
-
   const copyApiUrl = () => {
     const apiUrl = "https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications";
     navigator.clipboard.writeText(apiUrl);
     toast({
       title: "Copied!",
-      description: "API URL copied to clipboard",
+      description: "API URL copied to clipboard"
     });
   };
-
   const examplePayload = `{
   "type": "site_down",
   "title": "Site Down Alert", 
   "message": "example.com is not responding",
   "site": "example.com"
 }`;
-
-  return (
-    <div className="min-h-screen bg-background">
+  return <div className="min-h-screen bg-background">
       <Header />
       
       <div className="container mx-auto px-6 py-8">
         {/* Header with Logout */}
         <div className="flex items-center justify-end mb-8">
-          <Button 
-            onClick={handleLogout}
-            variant="outline"
-            className="flex items-center space-x-2"
-          >
+          <Button onClick={handleLogout} variant="outline" className="flex items-center space-x-2">
             <LogOut className="h-4 w-4" />
             <span>Logout</span>
           </Button>
@@ -107,14 +97,8 @@ const Dashboard: React.FC = () => {
                 
                 <div className="bg-muted p-4 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
-                    <code className="text-sm font-mono">
-                      https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={copyApiUrl}
-                    >
+                    <code className="text-sm font-mono">https://</code>
+                    <Button variant="ghost" size="sm" onClick={copyApiUrl}>
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
@@ -130,12 +114,7 @@ const Dashboard: React.FC = () => {
                     <pre className="bg-muted p-4 rounded-lg text-sm overflow-x-auto">
                       <code>{examplePayload}</code>
                     </pre>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="absolute top-2 right-2"
-                      onClick={() => navigator.clipboard.writeText(examplePayload)}
-                    >
+                    <Button variant="ghost" size="sm" className="absolute top-2 right-2" onClick={() => navigator.clipboard.writeText(examplePayload)}>
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
@@ -157,7 +136,7 @@ const Dashboard: React.FC = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <CardTitle>Recent Notifications</CardTitle>
-                <Button variant="ghost" size="sm" className="text-accent hover:text-accent">
+                <Button variant="ghost" size="sm" className="text-red-950">
                   View All
                 </Button>
               </CardHeader>
@@ -220,8 +199,8 @@ const Dashboard: React.FC = () => {
                   <span>Browser push notifications</span>
                 </div>
                 <div className="flex items-center space-x-2 text-sm">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span>WhatsApp-like experience</span>
+                  
+                  
                 </div>
               </CardContent>
             </Card>
@@ -229,36 +208,18 @@ const Dashboard: React.FC = () => {
             {/* Test Notification */}
             <Card>
               <CardContent className="pt-6">
-                <Button 
-                  onClick={() => sendTestNotification('high')}
-                  className="w-full mb-4 bg-primary hover:bg-primary/90"
-                >
+                <Button onClick={() => sendTestNotification('high')} className="w-full mb-4 bg-primary hover:bg-primary/90">
                   🔔 Test Notification
                 </Button>
                 
                 <div className="grid grid-cols-3 gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => sendTestNotification('low')}
-                    className="text-xs"
-                  >
+                  <Button variant="outline" size="sm" onClick={() => sendTestNotification('low')} className="text-xs">
                     Low
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => sendTestNotification('medium')}
-                    className="text-xs"
-                  >
+                  <Button variant="outline" size="sm" onClick={() => sendTestNotification('medium')} className="text-xs">
                     Medium
                   </Button>
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    onClick={() => sendTestNotification('high')}
-                    className="text-xs"
-                  >
+                  <Button variant="destructive" size="sm" onClick={() => sendTestNotification('high')} className="text-xs bg-gray-200 hover:bg-gray-100 text-slate-700">
                     High
                   </Button>
                 </div>
@@ -267,8 +228,6 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
-  );
+    </div>;
 };
-
 export default Dashboard;
