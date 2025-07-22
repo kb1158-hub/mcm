@@ -7,7 +7,6 @@ export class PushNotificationService {
   async initialize() {
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       try {
-        // Make sure the path matches your deployed service worker!
         this.registration = await navigator.serviceWorker.register('/service-worker.js', {
           scope: '/'
         });
@@ -70,20 +69,30 @@ export class PushNotificationService {
   }
 
   /**
-   * Sends a test notification to the user via the service worker.
+   * Sends a test notification with sound to the user via the service worker.
    */
-  async sendTestNotification(): Promise<void> {
+  async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
     if ('serviceWorker' in navigator && this.registration) {
-      // Use whichever is available: active, waiting, installing
       const sw = this.registration.active || this.registration.waiting || this.registration.installing;
       if (sw) {
         sw.postMessage({
           type: 'SHOW_NOTIFICATION',
-          title: 'MCM Alert',
-          body: 'Test notification from MCM Alerts system',
+          title: `MCM Alert - ${priority.toUpperCase()} Priority`,
+          body: `Test notification from MCM Alerts system (${priority} priority)`,
           icon: '/mcm-logo-192.png',
-          badge: '/mcm-logo-192.png'
+          badge: '/mcm-logo-192.png',
+          priority: priority
         });
+        
+        // Also play browser notification sound if supported
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(`MCM Alert - ${priority.toUpperCase()} Priority`, {
+            body: `Test notification from MCM Alerts system (${priority} priority)`,
+            icon: '/mcm-logo-192.png',
+            silent: false,
+            requireInteraction: priority === 'high'
+          });
+        }
       } else {
         console.warn('No active service worker found to send notification.');
       }

@@ -18,16 +18,17 @@ const AllNotifications: React.FC = () => {
         {notifications.length === 0 ? (
           <p>No notifications found.</p>
         ) : (
-          <ul>
+          <div className="space-y-3">
             {notifications.map((n) => (
-              <li key={n.id} style={{ marginBottom: 8 }}>
-                <strong>{n.title}</strong> - {n.body}{' '}
-                <span style={{ fontSize: 12, color: '#888' }}>
+              <div key={n.id} className="p-4 bg-muted/50 rounded-lg border">
+                <div className="font-semibold text-foreground mb-2">{n.title}</div>
+                <div className="text-muted-foreground mb-3">{n.body}</div>
+                <div className="text-xs text-muted-foreground">
                   {new Date(n.created_at).toLocaleString()}
-                </span>
-              </li>
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </CardContent>
     </Card>

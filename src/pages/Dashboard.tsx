@@ -49,15 +49,16 @@ const Dashboard: React.FC = () => {
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     if (notificationsEnabled) {
-      await pushService.sendTestNotification();
+      await pushService.sendTestNotification(priority);
       toast({
         title: "Test Notification Sent",
         description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`
       });
-      // Log notification in Supabase
+      
+      // Log notification in database and reload recent notifications
       await addNotification({
         title: `Test Notification (${priority})`,
-        body: `Test notification of ${priority} priority sent.`
+        body: `Test notification of ${priority} priority sent at ${new Date().toLocaleTimeString()}.`
       });
       await loadRecentNotifications();
     } else {
@@ -65,14 +66,14 @@ const Dashboard: React.FC = () => {
       if (permission) {
         await pushService.subscribe();
         setNotificationsEnabled(true);
-        await pushService.sendTestNotification();
+        await pushService.sendTestNotification(priority);
         toast({
           title: "Notifications Enabled & Test Sent",
           description: "Push notifications enabled and test notification sent"
         });
         await addNotification({
           title: `Test Notification (${priority})`,
-          body: `Test notification of ${priority} priority sent.`
+          body: `Test notification of ${priority} priority sent at ${new Date().toLocaleTimeString()}.`
         });
         await loadRecentNotifications();
       }
@@ -80,7 +81,7 @@ const Dashboard: React.FC = () => {
   };
 
   const copyApiUrl = () => {
-    const apiUrl = "https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications";
+    const apiUrl = `${window.location.origin}/api/notifications`;
     navigator.clipboard.writeText(apiUrl);
     toast({
       title: "Copied!",
@@ -92,7 +93,9 @@ const Dashboard: React.FC = () => {
   "type": "site_down",
   "title": "Site Down Alert", 
   "message": "example.com is not responding",
-  "site": "example.com"
+  "site": "example.com",
+  "priority": "high",
+  "timestamp": "${new Date().toISOString()}"
 }`;
 
   return (
@@ -124,7 +127,7 @@ const Dashboard: React.FC = () => {
                 </p>
                 <div className="bg-muted p-4 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
-                    <code className="text-sm font-mono">https://</code>
+                    <code className="text-sm font-mono">POST {window.location.origin}/api/notifications</code>
                     <Button variant="ghost" size="sm" onClick={copyApiUrl}>
                       <Copy className="h-4 w-4" />
                     </Button>
@@ -173,13 +176,17 @@ const Dashboard: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  <ul>
+                  <div className="space-y-3">
                     {notifications.map((n) => (
-                      <li key={n.id} style={{ marginBottom: 8 }}>
-                        <strong>{n.title}</strong> - {n.body} <span style={{ fontSize: 12, color: '#888' }}>{new Date(n.created_at).toLocaleString()}</span>
-                      </li>
+                      <div key={n.id} className="p-3 bg-muted/50 rounded-lg">
+                        <div className="font-medium text-sm">{n.title}</div>
+                        <div className="text-sm text-muted-foreground mt-1">{n.body}</div>
+                        <div className="text-xs text-muted-foreground mt-2">
+                          {new Date(n.created_at).toLocaleString()}
+                        </div>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -249,7 +256,7 @@ const Dashboard: React.FC = () => {
                   <Button variant="outline" size="sm" onClick={() => sendTestNotification('medium')} className="text-xs">
                     Medium
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => sendTestNotification('high')} className="text-xs bg-gray-200 hover:bg-gray-100 text-slate-700">
+                  <Button variant="destructive" size="sm" onClick={() => sendTestNotification('high')} className="text-xs">
                     High
                   </Button>
                 </div>

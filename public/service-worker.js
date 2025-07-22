@@ -51,6 +51,7 @@ self.addEventListener('push', event => {
     badge: '/mcm-logo-192.png',
     tag: 'mcm-alert',
     requireInteraction: true,
+    silent: false,
     actions: [
       { action: 'view', title: 'View Dashboard' },
       { action: 'dismiss', title: 'Dismiss' }
@@ -102,14 +103,21 @@ self.addEventListener('notificationclick', event => {
 // Handle messages from main thread
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, icon, badge } = event.data;
+    const { title, body, icon, badge, priority } = event.data;
+    
+    // Play sound based on priority
+    const soundOptions = {
+      silent: false,
+      requireInteraction: priority === 'high',
+      vibrate: priority === 'high' ? [200, 100, 200] : [100]
+    };
     
     self.registration.showNotification(title, {
       body,
       icon,
       badge,
       tag: 'mcm-alert',
-      requireInteraction: true,
+      ...soundOptions,
       actions: [
         { action: 'view', title: 'View Dashboard' },
         { action: 'dismiss', title: 'Dismiss' }

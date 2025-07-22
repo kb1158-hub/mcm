@@ -19,7 +19,7 @@ const ApiDocumentation: React.FC = () => {
     });
   };
 
-  const apiEndpoint = "https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications";
+  const apiEndpoint = `${window.location.origin}/api/notifications`;
 
   const examplePayloads = {
     siteDown: `{
@@ -80,10 +80,7 @@ const ApiDocumentation: React.FC = () => {
           "raw": "${examplePayloads.siteDown.replace(/\n/g, '\\n').replace(/"/g, '\\"')}"
         },
         "url": {
-          "raw": "${apiEndpoint}",
-          "protocol": "https",
-          "host": ["same-6nxlkq4m3xr-latest", "netlify", "app"],
-          "path": ["api", "notifications"]
+          "raw": "${apiEndpoint}"
         }
       }
     }
