@@ -8,24 +8,37 @@ import Header from '@/components/Header';
 import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
 import { LogOut, Copy, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { fetchRecentNotifications, addNotification } from '@/services/notificationService';
+
 const Dashboard: React.FC = () => {
-  const {
-    logout
-  } = useAuth();
-  const {
-    toast
-  } = useToast();
+  const { logout } = useAuth();
+  const { toast } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const navigate = useNavigate();
+
   useEffect(() => {
     initializePushNotifications();
+    loadRecentNotifications();
   }, []);
+
   const initializePushNotifications = async () => {
     await pushService.initialize();
     if ('Notification' in window) {
       setNotificationsEnabled(Notification.permission === 'granted');
     }
   };
+
+  const loadRecentNotifications = async () => {
+    try {
+      const data = await fetchRecentNotifications();
+      setNotifications(data || []);
+    } catch (err) {
+      setNotifications([]);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     toast({
@@ -33,6 +46,7 @@ const Dashboard: React.FC = () => {
       description: "You have been successfully logged out"
     });
   };
+
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     if (notificationsEnabled) {
       await pushService.sendTestNotification();
@@ -40,6 +54,12 @@ const Dashboard: React.FC = () => {
         title: "Test Notification Sent",
         description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`
       });
+      // Log notification in Supabase
+      await addNotification({
+        title: `Test Notification (${priority})`,
+        body: `Test notification of ${priority} priority sent.`
+      });
+      await loadRecentNotifications();
     } else {
       const permission = await pushService.requestPermission();
       if (permission) {
@@ -50,9 +70,15 @@ const Dashboard: React.FC = () => {
           title: "Notifications Enabled & Test Sent",
           description: "Push notifications enabled and test notification sent"
         });
+        await addNotification({
+          title: `Test Notification (${priority})`,
+          body: `Test notification of ${priority} priority sent.`
+        });
+        await loadRecentNotifications();
       }
     }
   };
+
   const copyApiUrl = () => {
     const apiUrl = "https://same-6nxlkq4m3xr-latest.netlify.app/api/notifications";
     navigator.clipboard.writeText(apiUrl);
@@ -61,15 +87,17 @@ const Dashboard: React.FC = () => {
       description: "API URL copied to clipboard"
     });
   };
+
   const examplePayload = `{
   "type": "site_down",
   "title": "Site Down Alert", 
   "message": "example.com is not responding",
   "site": "example.com"
 }`;
-  return <div className="min-h-screen bg-background">
+
+  return (
+    <div className="min-h-screen bg-background">
       <Header />
-      
       <div className="container mx-auto px-6 py-8">
         {/* Header with Logout */}
         <div className="flex items-center justify-end mb-8">
@@ -94,7 +122,6 @@ const Dashboard: React.FC = () => {
                 <p className="text-muted-foreground">
                   Use this endpoint to trigger notifications from Postman:
                 </p>
-                
                 <div className="bg-muted p-4 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <code className="text-sm font-mono">https://</code>
@@ -103,11 +130,9 @@ const Dashboard: React.FC = () => {
                     </Button>
                   </div>
                 </div>
-
                 <div className="text-sm text-muted-foreground mb-4">
                   <p><strong>Method:</strong> POST | <strong>Auth:</strong> None Required</p>
                 </div>
-
                 <div>
                   <h4 className="font-medium mb-2">Example payload:</h4>
                   <div className="relative">
@@ -119,7 +144,6 @@ const Dashboard: React.FC = () => {
                     </Button>
                   </div>
                 </div>
-
                 <Link to="/api-docs">
                   <Button variant="outline" className="flex items-center space-x-2">
                     <ExternalLink className="h-4 w-4" />
@@ -136,17 +160,27 @@ const Dashboard: React.FC = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <CardTitle>Recent Notifications</CardTitle>
-                <Button variant="ghost" size="sm" className="text-red-950">
+                <Button variant="ghost" size="sm" className="text-red-950" onClick={() => navigate('/notifications')}>
                   View All
                 </Button>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground">No notifications yet</p>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    Total notifications today: <strong>0</strong>
-                  </p>
-                </div>
+                {notifications.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">No notifications yet</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Total notifications today: <strong>0</strong>
+                    </p>
+                  </div>
+                ) : (
+                  <ul>
+                    {notifications.map((n) => (
+                      <li key={n.id} style={{ marginBottom: 8 }}>
+                        <strong>{n.title}</strong> - {n.body} <span style={{ fontSize: 12, color: '#888' }}>{new Date(n.created_at).toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </CardContent>
             </Card>
 
@@ -198,10 +232,7 @@ const Dashboard: React.FC = () => {
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <span>Browser push notifications</span>
                 </div>
-                <div className="flex items-center space-x-2 text-sm">
-                  
-                  
-                </div>
+                <div className="flex items-center space-x-2 text-sm"></div>
               </CardContent>
             </Card>
 
@@ -211,7 +242,6 @@ const Dashboard: React.FC = () => {
                 <Button onClick={() => sendTestNotification('high')} className="w-full mb-4 bg-primary hover:bg-primary/90">
                   🔔 Test Notification
                 </Button>
-                
                 <div className="grid grid-cols-3 gap-2">
                   <Button variant="outline" size="sm" onClick={() => sendTestNotification('low')} className="text-xs">
                     Low
@@ -228,6 +258,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>;
+    </div>
+  );
 };
 export default Dashboard;
