@@ -114,15 +114,6 @@ export class PushNotificationService {
     }
 
     try {
-      // Check current permission
-      if (Notification.permission === 'granted') {
-        return true;
-      }
-      
-      if (Notification.permission === 'denied') {
-        console.warn('Notification permission is denied');
-        return false;
-      }
 
       // Request permission
       const permission = await Notification.requestPermission();

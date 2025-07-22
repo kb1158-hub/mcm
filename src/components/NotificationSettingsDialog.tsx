@@ -1,118 +1,96 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Settings, AlertCircle } from 'lucide-react';
-import { pushService } from '@/services/pushNotificationService';
-import { toast } from '@/components/ui/sonner'; // Or your chosen toast library
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Settings, Bell, Volume2 } from 'lucide-react';
+import { toast } from '@/components/ui/sonner';
+import { Badge } from '@/components/ui/badge';
 
 const NotificationSettingsDialog: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [pushEnabled, setPushEnabled] = useState(false);
-  const [pushLoading, setPushLoading] = useState(false);
-  const [emailEnabled, setEmailEnabled] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission>(Notification.permission);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // Check push subscription on mount
+  // Check notification permission on mount and dialog open
   useEffect(() => {
-    (async () => {
-      await pushService.initialize();
-      if ('serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.getSubscription();
-          setPushEnabled(!!sub);
-        } catch (error) {
-          console.warn('Service worker not available:', error);
-        }
-      }
+    if ('Notification' in window) {
       setPermission(Notification.permission);
-    })();
-  }, []);
-
-  // Update permission state when dialog opens
-  useEffect(() => {
-    if (isDialogOpen) {
-      setPermission(Notification.permission);
+      setNotificationsEnabled(Notification.permission === 'granted');
     }
   }, [isDialogOpen]);
 
-  // Handle push notification enable/disable
-  const handlePushChange = async (checked: boolean) => {
-    setPushLoading(true);
-    
-    if (checked) {
+  // Handle notification toggle
+  const handleNotificationToggle = async (enabled: boolean) => {
+    if (enabled) {
       try {
-        // First request permission
-        const granted = await pushService.requestPermission();
-        setPermission(Notification.permission);
+        const permission = await Notification.requestPermission();
+        setPermission(permission);
+        setNotificationsEnabled(permission === 'granted');
         
-        if (granted) {
-          // Then subscribe to push notifications
-          const sub = await pushService.subscribe();
-          setPushEnabled(!!sub);
-          if (sub) {
-            toast.success('Browser push notifications enabled successfully!');
-          } else {
-            toast.error('Failed to subscribe to push notifications');
-          }
+        if (permission === 'granted') {
+          toast.success('✅ Browser notifications enabled!');
+          
+          // Send test notification
+          new Notification('MCM Alerts', {
+            body: 'Notifications are now enabled! 🔔',
+            icon: '/mcm-logo-192.png',
+            tag: 'welcome'
+          });
         } else {
-          setPushEnabled(false);
-          toast.error('Notification permission denied. Please enable notifications in your browser settings.');
+          toast.error('❌ Notification permission denied');
         }
       } catch (error) {
-        console.error('Error enabling push notifications:', error);
-        setPushEnabled(false);
-        toast.error('Failed to enable push notifications: ' + error.message);
+        console.error('Error requesting notification permission:', error);
+        toast.error('Failed to enable notifications');
       }
     } else {
-      try {
-        // Disable push notifications
-        const result = await pushService.unsubscribe();
-        setPushEnabled(!result);
-        if (result) {
-          toast.success('Browser push notifications disabled.');
-        }
-      } catch (error) {
-        console.error('Error disabling push notifications:', error);
-        toast.error('Failed to disable push notifications');
-      }
+      setNotificationsEnabled(false);
+      toast.success('Notifications disabled');
     }
-    setPushLoading(false);
   };
 
-  // Handle manual permission request
-  const handleRequestPermission = async () => {
-    setPushLoading(true);
-    try {
-      const granted = await pushService.requestPermission();
-      setPermission(Notification.permission);
+  // Test notification
+  const sendTestNotification = () => {
+    if (Notification.permission === 'granted') {
+      new Notification('Test Notification', {
+        body: 'This is a test notification from MCM Alerts! 🚀',
+        icon: '/mcm-logo-192.png',
+        tag: 'test'
+      });
       
-      if (granted) {
-        toast.success('Notification permission granted! You can now enable push notifications.');
-      } else {
-        toast.error('Notification permission denied. Please check your browser settings.');
+      if (soundEnabled) {
+        // Simple beep sound
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+        oscillator.type = 'sine';
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
       }
-    } catch (error) {
-      console.error('Error requesting permission:', error);
-      toast.error('Failed to request notification permission');
+      
+      toast.success('✅ Test notification sent!');
+    } else {
+      toast.error('Please enable notifications first');
     }
-    setPushLoading(false);
   };
 
-  const getPermissionStatusText = () => {
+  const getStatusBadge = () => {
     switch (permission) {
       case 'granted':
-        return pushEnabled ? 'Push notifications enabled' : 'Permission granted (click to enable)';
+        return <Badge className="bg-green-100 text-green-800">✅ Enabled</Badge>;
       case 'denied':
-        return 'Permission denied - check browser settings';
-      case 'default':
-        return 'Permission not requested yet';
+        return <Badge variant="destructive">❌ Blocked</Badge>;
       default:
-        return 'Unknown permission status';
+        return <Badge variant="outline">⏳ Not Set</Badge>;
     }
   };
 
@@ -125,76 +103,82 @@ const NotificationSettingsDialog: React.FC = () => {
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Notification Settings</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Notification Settings
+          </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="flex items-center space-x-2">
-            <Checkbox 
-              id="sound" 
-              checked={soundEnabled}
-              onCheckedChange={(checked) => setSoundEnabled(checked === true)}
-            />
-            <Label htmlFor="sound">Play sound for notifications</Label>
+        
+        <div className="space-y-6 py-4">
+          {/* Notification Status */}
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium">Browser Notifications</p>
+              <p className="text-sm text-gray-600">Status: {getStatusBadge()}</p>
+            </div>
           </div>
-          
-          {permission === 'denied' && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Browser notifications are blocked. To enable them:
-                <br />
-                1. Click the lock/info icon in your browser's address bar
-                <br />
-                2. Set "Notifications" to "Allow"
-                <br />
-                3. Refresh the page and try again
-              </AlertDescription>
-            </Alert>
-          )}
-          
-          {permission === 'default' && (
-            <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded-lg border border-blue-200">
-              <p>Click the checkbox below to request notification permission from your browser.</p>
+
+          {/* Enable/Disable Notifications */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Bell className="h-5 w-5 text-blue-600" />
+              <div>
+                <Label htmlFor="notifications" className="font-medium">
+                  Browser Notifications
+                </Label>
+                <p className="text-sm text-gray-600">
+                  Get notified about important alerts
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="notifications"
+              checked={notificationsEnabled}
+              onCheckedChange={handleNotificationToggle}
+            />
+          </div>
+
+          {/* Sound Settings */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Volume2 className="h-5 w-5 text-green-600" />
+              <div>
+                <Label htmlFor="sound" className="font-medium">
+                  Notification Sounds
+                </Label>
+                <p className="text-sm text-gray-600">
+                  Play sound with notifications
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="sound"
+              checked={soundEnabled}
+              onCheckedChange={setSoundEnabled}
+            />
+          </div>
+
+          {/* Test Button */}
+          {notificationsEnabled && (
+            <div className="pt-4 border-t">
+              <Button 
+                onClick={sendTestNotification}
+                className="w-full"
+                variant="outline"
+              >
+                🔔 Send Test Notification
+              </Button>
             </div>
           )}
 
-          <div className="flex items-center space-x-2">
-            <Checkbox 
-              id="push" 
-              checked={pushEnabled}
-              onCheckedChange={async (checked) => {
-                if (!pushLoading) await handlePushChange(checked === true);
-              }}
-              disabled={pushLoading}
-            />
-            <Label htmlFor="push">
-              Browser push notifications
-              {pushLoading && <span className="ml-2 text-gray-400">...</span>}
-            </Label>
-            {permission === 'denied' && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRequestPermission}
-                disabled={pushLoading}
-                className="ml-2"
-              >
-                Request Permission
-              </Button>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <Checkbox 
-              id="email" 
-              checked={emailEnabled}
-              onCheckedChange={(checked) => setEmailEnabled(checked === true)}
-            />
-            <Label htmlFor="email">Email notifications</Label>
-          </div>
-        </div>
-        <div className="pt-2 text-sm text-muted-foreground">
-          <strong>Status:</strong> {getPermissionStatusText()}
+          {/* Help Text */}
+          {permission === 'denied' && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-800">
+                <strong>Notifications Blocked:</strong> Click the lock icon in your browser's address bar and allow notifications, then refresh the page.
+              </p>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

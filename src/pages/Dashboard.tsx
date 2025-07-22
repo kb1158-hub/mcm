@@ -49,41 +49,82 @@ const Dashboard: React.FC = () => {
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     try {
-      // Show loading state
-      toast({
-        title: "Sending Notification...",
-        description: `Preparing ${priority} priority test notification`,
+      // Auto-enable notifications if not already enabled
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          toast({
+            title: "Enable Notifications",
+            description: "Please allow notifications in your browser to receive alerts",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Send simple browser notification
+      const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
+      const body = `Test notification (${priority} priority) - ${new Date().toLocaleTimeString()}`;
+      
+      // Create browser notification
+      const notification = new Notification(title, {
+        body,
+        icon: '/mcm-logo-192.png',
+        badge: '/mcm-logo-192.png',
+        tag: 'mcm-test',
+        requireInteraction: priority === 'high',
+        silent: false
       });
 
-      // Send the notification
-      await pushService.sendTestNotification(priority);
+      // Play sound
+      const audio = new Audio();
+      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
       
-      toast({
-        title: "Test Notification Sent",
-        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully with sound`,
+      // Simple beep sound
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+
+      // Store in database
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'test_notification',
+          title,
+          message: body,
+          priority
+        })
       });
-      
-      // Reload recent notifications after a short delay
-      setTimeout(async () => {
-        await loadRecentNotifications();
-      }, 1000);
+
+      // Auto-close notification after delay
+      setTimeout(() => notification.close(), priority === 'high' ? 10000 : 5000);
+
+      toast({
+        title: "✅ Notification Sent!",
+        description: `${priority} priority notification with sound`,
+      });
+
+      // Refresh notifications list
+      loadRecentNotifications();
       
     } catch (error) {
       console.error('Failed to send test notification:', error);
-      
-      if (error.message === 'Notification permission not granted') {
-        toast({
-          title: "Notification Permission Required",
-          description: "Please enable browser notifications by clicking the bell icon in the header to access Notification Settings.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Notification Failed",
-          description: `Failed to send test notification: ${error.message}`,
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: "❌ Notification Failed",
+        description: "Please check your browser settings and try again",
+        variant: "destructive",
+      });
     }
   };
 
