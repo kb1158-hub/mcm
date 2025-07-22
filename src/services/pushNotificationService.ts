@@ -108,11 +108,30 @@ export class PushNotificationService {
    * Requests permission from the user for notifications.
    */
   async requestPermission(): Promise<boolean> {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      return permission === 'granted';
+    if (!('Notification' in window)) {
+      console.warn('This browser does not support notifications');
+      return false;
     }
-    return false;
+
+    try {
+      // Check current permission
+      if (Notification.permission === 'granted') {
+        return true;
+      }
+      
+      if (Notification.permission === 'denied') {
+        console.warn('Notification permission is denied');
+        return false;
+      }
+
+      // Request permission
+      const permission = await Notification.requestPermission();
+      console.log('Notification permission result:', permission);
+      return permission === 'granted';
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+      return false;
+    }
   }
 
   /**
