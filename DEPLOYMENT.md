@@ -48,9 +48,12 @@ This guide will walk you through deploying the MCM Alerts application to Netlify
    ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
    ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
-   -- Create policies (adjust as needed for your security requirements)
-   CREATE POLICY "Allow all operations on notifications" ON notifications FOR ALL USING (true);
-   CREATE POLICY "Allow all operations on subscriptions" ON subscriptions FOR ALL USING (true);
+   -- Create policies for public access (adjust as needed for your security requirements)
+   CREATE POLICY "Allow public read on notifications" ON notifications FOR SELECT USING (true);
+   CREATE POLICY "Allow public insert on notifications" ON notifications FOR INSERT WITH CHECK (true);
+   CREATE POLICY "Allow public read on subscriptions" ON subscriptions FOR SELECT USING (true);
+   CREATE POLICY "Allow public insert on subscriptions" ON subscriptions FOR INSERT WITH CHECK (true);
+   CREATE POLICY "Allow public delete on subscriptions" ON subscriptions FOR DELETE USING (true);
    ```
 
 3. **Get your Supabase credentials:**
@@ -118,48 +121,95 @@ This guide will walk you through deploying the MCM Alerts application to Netlify
    - Click the "Test Notification" button
    - Try different priority levels (Low, Medium, High)
    - Check that notifications appear in the "Recent Notifications" section
+   - Verify that sounds play and vibrations work on mobile devices
 
 4. **Test API endpoints:**
    - Use the API documentation page
    - Test with Postman using the provided examples
    - Endpoint: `https://your-site.netlify.app/api/notifications`
+   - Verify that external API calls create notifications that appear in the dashboard
+
+5. **Test PWA functionality:**
+   - On mobile, look for "Add to Home Screen" prompt
+   - Install the PWA and test offline functionality
+   - Verify push notifications work when app is in background
 
 ## Step 7: Verify Service Worker
 
 1. **Open browser developer tools**
 2. **Go to Application tab > Service Workers**
 3. **Verify the service worker is registered and active**
-4. **Test push notifications work properly**
+4. **Test push notifications work properly with sound and vibration**
+5. **Check that notifications work in background/when app is closed**
 
 ## API Endpoints
 
 After deployment, your API endpoints will be:
 
 - **Send Notification**: `POST https://your-site.netlify.app/api/notifications`
+- **Get Notifications**: `GET https://your-site.netlify.app/api/notifications`
 - **Subscribe to Push**: `POST https://your-site.netlify.app/api/subscribe`
 - **Send Push Notification**: `POST https://your-site.netlify.app/api/send-notification`
 
+## Testing with Postman
+
+1. **Send a test notification:**
+   ```json
+   POST https://your-site.netlify.app/api/notifications
+   Content-Type: application/json
+
+   {
+     "type": "test",
+     "title": "Test from Postman",
+     "message": "This is a test notification from Postman",
+     "priority": "high"
+   }
+   ```
+
+2. **Verify the notification appears in the dashboard immediately**
+
 ## Troubleshooting
+
+### 403 Errors from Postman
+- Ensure CORS headers are properly configured in Netlify functions
+- Check that the API endpoint URL is correct
+- Verify Supabase RLS policies allow public access
 
 ### Service Worker Issues
 - Ensure HTTPS is enabled
 - Check browser console for Service Worker registration errors
 - Verify `service-worker.js` is accessible at the root
+- Clear browser cache and re-register service worker
 
 ### Push Notifications Not Working
 - Verify VAPID keys are correctly set in environment variables
 - Check that notification permissions are granted
 - Ensure Supabase tables are created correctly
+- Test on actual mobile device (not just desktop browser)
+
+### Sound Issues
+- Ensure user has interacted with the page before sounds can play
+- Check browser's autoplay policies
+- Test on different browsers and devices
+- Verify audio context is properly initialized
 
 ### API Endpoints Failing
 - Check Netlify function logs in the dashboard
 - Verify environment variables are set correctly
 - Ensure Supabase credentials are valid
+- Check CORS configuration
 
 ### Build Failures
 - Check that all dependencies are installed
 - Verify `netlify.toml` configuration is correct
 - Check build logs for specific error messages
+- Ensure all required files are committed to repository
+
+### PWA Installation Issues
+- Verify manifest.json is properly configured
+- Check that all required PWA criteria are met
+- Test on different devices and browsers
+- Ensure HTTPS is enabled
 
 ## Environment Variables Reference
 
@@ -179,6 +229,7 @@ VAPID_PRIVATE_KEY=your_vapid_private_key_here
 2. **Use environment variables for all secrets**
 3. **Configure proper Row Level Security policies in Supabase**
 4. **Consider implementing proper authentication for production use**
+5. **Review CORS settings for production security**
 
 ## Support
 
@@ -188,6 +239,8 @@ If you encounter issues during deployment:
 2. Review the browser console for errors
 3. Verify all environment variables are set correctly
 4. Ensure Supabase database tables are created properly
+5. Test API endpoints individually
+6. Verify PWA manifest and service worker registration
 
 ## Next Steps
 
@@ -198,5 +251,7 @@ After successful deployment:
 3. **Implement rate limiting** for API endpoints
 4. **Set up analytics** to track notification delivery
 5. **Create backup strategies** for your Supabase data
+6. **Optimize for different mobile platforms**
+7. **Set up automated testing** for notification functionality
 
-Your MCM Alerts application is now ready for production use with full Service Worker and push notification support!
+Your MCM Alerts application is now ready for production use with full PWA capabilities, Service Worker support, push notifications with sound and vibration, and mobile optimization!

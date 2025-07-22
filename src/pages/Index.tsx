@@ -13,16 +13,24 @@ const Index = () => {
     // Initialize PWA and push notifications
     pushService.initialize();
     
-    // Register service worker if not already registered
-    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
-      navigator.serviceWorker.register('/sw.js')
+    // Register service worker for PWA functionality
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js')
         .then(registration => {
-          console.log('SW registered: ', registration);
+          console.log('PWA Service Worker registered: ', registration);
         })
         .catch(registrationError => {
-          console.log('SW registration failed: ', registrationError);
+          console.log('PWA Service Worker registration failed: ', registrationError);
         });
     }
+
+    // Add PWA install prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      console.log('PWA install prompt available');
+    });
   }, []);
 
   if (isAuthenticated) {

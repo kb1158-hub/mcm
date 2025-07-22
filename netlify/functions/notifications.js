@@ -6,11 +6,12 @@ const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsI
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 exports.handler = async (event, context) => {
-  // Enable CORS
+  // Enhanced CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Max-Age': '86400',
   };
 
   // Handle preflight requests
@@ -22,17 +23,24 @@ exports.handler = async (event, context) => {
     };
   }
 
+  console.log('Request method:', event.httpMethod);
+  console.log('Request body:', event.body);
+  console.log('Request headers:', event.headers);
+
   if (event.httpMethod === 'POST') {
     try {
-      const body = JSON.parse(event.body);
+      const body = JSON.parse(event.body || '{}');
       const { type, title, message, priority = 'medium', ...otherData } = body;
+
+      console.log('Parsed body:', { type, title, message, priority, otherData });
 
       if (!title || !message) {
         return {
           statusCode: 400,
           headers,
           body: JSON.stringify({ 
-            error: 'Missing required fields: title and message are required' 
+            error: 'Missing required fields: title and message are required',
+            received: { title, message }
           }),
         };
       }
@@ -57,19 +65,21 @@ exports.handler = async (event, context) => {
         return {
           statusCode: 500,
           headers,
-          body: JSON.stringify({ error: 'Failed to store notification' }),
+          body: JSON.stringify({ 
+            error: 'Failed to store notification',
+            details: error.message 
+          }),
         };
       }
 
-      // Here you could add push notification logic to send to subscribed users
-      // For now, we'll just return success
+      console.log('Notification stored successfully:', data[0]);
 
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({ 
           success: true, 
-          message: 'Notification received and stored',
+          message: 'Notification received and stored successfully',
           notification: data[0]
         }),
       };
@@ -78,7 +88,10 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ error: 'Internal server error' }),
+        body: JSON.stringify({ 
+          error: 'Internal server error',
+          details: error.message 
+        }),
       };
     }
   }
@@ -90,28 +103,37 @@ exports.handler = async (event, context) => {
         .from('notifications')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(50);
 
       if (error) {
         console.error('Supabase error:', error);
         return {
           statusCode: 500,
           headers,
-          body: JSON.stringify({ error: 'Failed to fetch notifications' }),
+          body: JSON.stringify({ 
+            error: 'Failed to fetch notifications',
+            details: error.message 
+          }),
         };
       }
 
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ notifications: data }),
+        body: JSON.stringify({ 
+          success: true,
+          notifications: data || []
+        }),
       };
     } catch (error) {
       console.error('Error fetching notifications:', error);
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ error: 'Internal server error' }),
+        body: JSON.stringify({ 
+          error: 'Internal server error',
+          details: error.message 
+        }),
       };
     }
   }

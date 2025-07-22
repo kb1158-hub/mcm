@@ -49,12 +49,18 @@ const Dashboard: React.FC = () => {
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     try {
-      // Always try to send the notification
+      // Show loading state
+      toast({
+        title: "Sending Notification...",
+        description: `Preparing ${priority} priority test notification`,
+      });
+
+      // Send the notification
       await pushService.sendTestNotification(priority);
       
       toast({
         title: "Test Notification Sent",
-        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent`,
+        description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully with sound`,
       });
       
       // Reload recent notifications after a short delay
@@ -66,7 +72,7 @@ const Dashboard: React.FC = () => {
       console.error('Failed to send test notification:', error);
       toast({
         title: "Notification Failed",
-        description: "Failed to send test notification. Please check permissions.",
+        description: `Failed to send test notification: ${error.message}`,
         variant: "destructive",
       });
     }
@@ -164,6 +170,9 @@ const Dashboard: React.FC = () => {
                   <div className="text-center py-8">
                     <p className="text-muted-foreground">No notifications yet</p>
                     <p className="text-sm text-muted-foreground mt-2">
+                      Click "Test Notification" to see notifications appear here
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-2">
                       Total notifications today: <strong>0</strong>
                     </p>
                   </div>
@@ -171,7 +180,12 @@ const Dashboard: React.FC = () => {
                   <div className="space-y-3">
                     {notifications.map((n) => (
                       <div key={n.id} className="p-3 bg-muted/50 rounded-lg">
-                        <div className="font-medium text-sm">{n.title}</div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-medium text-sm">{n.title}</div>
+                          <Badge variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}>
+                            {n.priority || 'medium'}
+                          </Badge>
+                        </div>
                         <div className="text-sm text-muted-foreground mt-1">{n.body}</div>
                         <div className="text-xs text-muted-foreground mt-2">
                           {new Date(n.created_at).toLocaleString()}
@@ -238,20 +252,23 @@ const Dashboard: React.FC = () => {
             {/* Test Notification */}
             <Card>
               <CardContent className="pt-6">
-                <Button onClick={() => sendTestNotification('high')} className="w-full mb-4 bg-primary hover:bg-primary/90">
-                  🔔 Test Notification
+                <Button onClick={() => sendTestNotification('medium')} className="w-full mb-4 bg-primary hover:bg-primary/90">
+                  🔔 Test Notification (with Sound)
                 </Button>
                 <div className="grid grid-cols-3 gap-2">
                   <Button variant="outline" size="sm" onClick={() => sendTestNotification('low')} className="text-xs">
-                    Low
+                    🔕 Low
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => sendTestNotification('medium')} className="text-xs">
-                    Medium
+                    🔔 Medium
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => sendTestNotification('high')} className="text-xs">
-                    High
+                    🚨 High
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  Each priority level has different sound and vibration patterns
+                </p>
               </CardContent>
             </Card>
           </div>

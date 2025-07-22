@@ -1,11 +1,13 @@
-// MCM Alerts Service Worker
+// MCM Alerts Service Worker with Enhanced Sound and Mobile Support
 
-const CACHE_NAME = 'mcm-alerts-v1';
+const CACHE_NAME = 'mcm-alerts-v2';
 const urlsToCache = [
   '/',
   '/manifest.json',
   '/mcm-logo-192.png',
-  '/mcm-logo-512.png'
+  '/mcm-logo-512.png',
+  '/static/js/bundle.js',
+  '/static/css/main.css'
 ];
 
 // Install event - cache resources
@@ -55,7 +57,7 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Push event - handle push notifications
+// Enhanced push event with sound and vibration
 self.addEventListener('push', event => {
   console.log('Push event received:', event);
   
@@ -67,14 +69,16 @@ self.addEventListener('push', event => {
     tag: 'mcm-alert',
     requireInteraction: false,
     silent: false,
-    vibrate: [100, 50, 100],
+    vibrate: [200, 100, 200],
+    sound: '/notification-sound.mp3', // Add sound file
     actions: [
       { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
       { action: 'dismiss', title: 'Dismiss' }
     ],
     data: {
       url: '/',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      playSound: true
     }
   };
 
@@ -87,13 +91,17 @@ self.addEventListener('push', event => {
         data: { ...notificationData.data, ...data.data }
       };
       
-      // Set priority-based options
+      // Set priority-based options for mobile
       if (data.priority === 'high') {
         notificationData.requireInteraction = true;
-        notificationData.vibrate = [200, 100, 200, 100, 200];
+        notificationData.vibrate = [300, 100, 300, 100, 300];
+        notificationData.silent = false;
       } else if (data.priority === 'low') {
-        notificationData.silent = true;
-        notificationData.vibrate = [50];
+        notificationData.vibrate = [100];
+        notificationData.silent = false; // Keep sound for all notifications
+      } else {
+        notificationData.vibrate = [200, 100, 200];
+        notificationData.silent = false;
       }
     } catch (e) {
       console.error('Could not parse push data:', e);
@@ -101,15 +109,36 @@ self.addEventListener('push', event => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(notificationData.title, notificationData)
-      .then(() => {
-        console.log('Notification displayed successfully');
-      })
-      .catch(error => {
-        console.error('Failed to show notification:', error);
-      })
+    Promise.all([
+      // Show notification
+      self.registration.showNotification(notificationData.title, notificationData),
+      // Play sound manually for better mobile support
+      playNotificationSound(notificationData.data?.priority || 'medium')
+    ]).then(() => {
+      console.log('Notification displayed and sound played successfully');
+    }).catch(error => {
+      console.error('Failed to show notification or play sound:', error);
+    })
   );
 });
+
+// Function to play notification sound
+async function playNotificationSound(priority) {
+  try {
+    // Get all clients (open tabs/windows)
+    const clients = await self.clients.matchAll({ includeUncontrolled: true });
+    
+    // Send message to all clients to play sound
+    clients.forEach(client => {
+      client.postMessage({
+        type: 'PLAY_NOTIFICATION_SOUND',
+        priority: priority
+      });
+    });
+  } catch (error) {
+    console.error('Failed to play notification sound:', error);
+  }
+}
 
 // Handle notification click
 self.addEventListener('notificationclick', event => {
@@ -142,12 +171,11 @@ self.addEventListener('notificationclick', event => {
         })
     );
   } else if (event.action === 'dismiss') {
-    // Just close the notification (already done above)
     console.log('Notification dismissed');
   }
 });
 
-// Handle messages from main thread
+// Enhanced message handling with sound support
 self.addEventListener('message', event => {
   console.log('Service Worker received message:', event.data);
   
@@ -160,9 +188,9 @@ self.addEventListener('message', event => {
       icon: icon || '/mcm-logo-192.png',
       badge: badge || '/mcm-logo-192.png',
       tag: 'mcm-alert',
-      silent: false,
+      silent: false, // Never silent for better sound support
       requireInteraction: priority === 'high',
-      vibrate: priority === 'high' ? [200, 100, 200] : [100],
+      vibrate: priority === 'high' ? [300, 100, 300] : [200, 100, 200],
       actions: [
         { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
         { action: 'dismiss', title: 'Dismiss' }
@@ -170,20 +198,21 @@ self.addEventListener('message', event => {
       data: {
         url: '/',
         priority: priority || 'medium',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        playSound: true
       }
     };
     
-    self.registration.showNotification(title, notificationOptions)
-      .then(() => {
-        console.log('Manual notification displayed successfully');
-        // Send confirmation back to main thread
-        event.ports[0]?.postMessage({ success: true });
-      })
-      .catch(error => {
-        console.error('Failed to show manual notification:', error);
-        event.ports[0]?.postMessage({ success: false, error: error.message });
-      });
+    Promise.all([
+      self.registration.showNotification(title, notificationOptions),
+      playNotificationSound(priority || 'medium')
+    ]).then(() => {
+      console.log('Manual notification displayed and sound played successfully');
+      event.ports[0]?.postMessage({ success: true });
+    }).catch(error => {
+      console.error('Failed to show manual notification or play sound:', error);
+      event.ports[0]?.postMessage({ success: false, error: error.message });
+    });
   }
 });
 
@@ -192,4 +221,4 @@ self.addEventListener('notificationclose', event => {
   console.log('Notification closed:', event.notification.tag);
 });
 
-console.log('Service Worker loaded successfully');
+console.log('Service Worker loaded successfully with enhanced mobile support');
