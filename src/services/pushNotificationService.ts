@@ -181,6 +181,79 @@ export class PushNotificationService {
     return outputArray;
   }
 
+  // Fixed method - always use Service Worker for notifications on mobile
+  private async showServiceWorkerNotification(title: string, body: string, priority: 'low' | 'medium' | 'high'): Promise<boolean> {
+    try {
+      if (!this.registration) {
+        await this.initialize();
+      }
+
+      if (this.registration) {
+        // Use MessageChannel for better communication with Service Worker
+        const messageChannel = new MessageChannel();
+        
+        return new Promise((resolve, reject) => {
+          messageChannel.port1.onmessage = (event) => {
+            if (event.data.success) {
+              console.log('Service Worker notification sent successfully');
+              resolve(true);
+            } else {
+              console.error('Service Worker notification failed:', event.data.error);
+              reject(new Error(event.data.error));
+            }
+          };
+
+          // Send message to service worker
+          this.registration!.active?.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title,
+            body,
+            priority,
+            icon: '/mcm-logo-192.png',
+            badge: '/mcm-logo-192.png',
+            tag: 'mcm-test-notification',
+            requireInteraction: priority === 'high',
+            silent: false,
+            vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+            actions: [
+              { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+              { action: 'dismiss', title: 'Dismiss' }
+            ],
+            data: {
+              url: '/',
+              priority: priority,
+              timestamp: Date.now()
+            }
+          }, [messageChannel.port2]);
+
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            reject(new Error('Service Worker notification timeout'));
+          }, 5000);
+        });
+      }
+      
+      throw new Error('Service Worker not available');
+    } catch (error) {
+      console.error('Service Worker notification failed:', error);
+      throw error;
+    }
+  }
+
+  // Mobile-safe fallback that doesn't use the Notification constructor
+  private showMobileSafeFallback(title: string, body: string, priority: 'low' | 'medium' | 'high') {
+    console.warn('Using mobile-safe notification fallback (no visual notification)');
+    
+    // Just play sound and log - don't try to show visual notification
+    this.playNotificationSound(priority);
+    
+    // You could show an in-app notification banner here instead
+    // For example, dispatch a custom event that your app can listen to
+    window.dispatchEvent(new CustomEvent('fallback-notification', {
+      detail: { title, body, priority }
+    }));
+  }
+
   async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
     const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
     const body = `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
@@ -195,26 +268,20 @@ export class PushNotificationService {
       await this.audioContext.resume();
     }
 
-    await this.playNotificationSound(priority);
-
-    if (!this.isStackBlitz && this.registration) {
+    // Always try Service Worker first, even on desktop
+    if (!this.isStackBlitz && 'serviceWorker' in navigator) {
       try {
-        const reg = await navigator.serviceWorker.ready;
-        reg.active?.postMessage({
-          type: 'SHOW_NOTIFICATION',
-          title,
-          body,
-          priority
-        });
-        console.log('Message sent to service worker for background notification');
+        await this.showServiceWorkerNotification(title, body, priority);
+        console.log('Service Worker notification sent successfully');
       } catch (error) {
-        console.error('Failed to post message to service worker:', error);
-        this.showFallbackNotification(title, body, priority);
+        console.error('Service Worker notification failed, using fallback:', error);
+        this.showMobileSafeFallback(title, body, priority);
       }
     } else {
-      this.showFallbackNotification(title, body, priority);
+      this.showMobileSafeFallback(title, body, priority);
     }
 
+    // Store notification in backend
     try {
       const response = await fetch('/api/notifications', {
         method: 'POST',
@@ -239,43 +306,6 @@ export class PushNotificationService {
     } catch (error) {
       console.error('Failed to store notification in backend:', error);
       throw error;
-    }
-  }
-
-  private showFallbackNotification(title: string, body: string, priority: 'low' | 'medium' | 'high') {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        const notification = new Notification(title, {
-          body,
-          icon: '/mcm-logo-192.png',
-          badge: '/mcm-logo-192.png',
-          silent: false,
-          requireInteraction: priority === 'high',
-          tag: 'mcm-test-notification',
-          vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
-          data: {
-            priority: priority,
-            timestamp: Date.now()
-          }
-        });
-
-        if (priority !== 'high') {
-          setTimeout(() => {
-            try {
-              notification.close();
-            } catch (e) {}
-          }, 5000);
-        }
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-
-        console.log('Fallback browser notification sent successfully');
-      } catch (error) {
-        console.error('Fallback browser notification failed:', error);
-      }
     }
   }
 
