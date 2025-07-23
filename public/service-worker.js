@@ -57,7 +57,7 @@ self.addEventListener('fetch', event => {
 // Enhanced push event for mobile background notifications
 self.addEventListener('push', event => {
   console.log('Push event received:', event);
-  
+
   let notificationData = {
     title: 'MCM Alert',
     body: 'New alert received',
@@ -80,12 +80,12 @@ self.addEventListener('push', event => {
   if (event.data) {
     try {
       const data = event.data.json();
-      notificationData = { 
-        ...notificationData, 
+      notificationData = {
+        ...notificationData,
         ...data,
         data: { ...notificationData.data, ...data.data }
       };
-      
+
       // Set priority-based options for mobile
       if (data.priority === 'high') {
         notificationData.requireInteraction = true;
@@ -117,7 +117,7 @@ self.addEventListener('push', event => {
       data: notificationData.data
     }).then(() => {
       console.log('Background notification displayed successfully');
-      
+
       // Send message to all clients to play sound
       return self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
         clients.forEach(client => {
@@ -136,9 +136,9 @@ self.addEventListener('push', event => {
 // Handle notification click
 self.addEventListener('notificationclick', event => {
   console.log('Notification clicked:', event);
-  
+
   event.notification.close();
-  
+
   let targetUrl = '/';
   if (event.notification.data && event.notification.data.url) {
     targetUrl = event.notification.data.url;
@@ -169,28 +169,48 @@ self.addEventListener('notificationclick', event => {
 // Enhanced message handling
 self.addEventListener('message', event => {
   console.log('Service Worker received message:', event.data);
-  
+
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, icon, badge, priority } = event.data;
-    
+    // Instead of destructuring only a few, pull out all relevant properties
+    const { 
+        title, 
+        body, 
+        icon, 
+        badge, 
+        priority, 
+        tag, // <-- Now properly destructured
+        requireInteraction, // <-- Now properly destructured
+        silent, // <-- Now properly destructured
+        vibrate, // <-- Now properly destructured
+        actions, // <-- Now properly destructured
+        data // <-- Now properly destructured
+    } = event.data;
+
     const notificationOptions = {
       body,
       icon: icon || '/mcm-logo-192.png',
       badge: badge || '/mcm-logo-192.png',
-      tag: 'mcm-alert',
-      silent: false,
-      requireInteraction: priority === 'high',
-      vibrate: priority === 'high' ? [300, 100, 300] : [200, 100, 200],
-      actions: [
-        { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
-        { action: 'dismiss', title: 'Dismiss' }
-      ],
-      data: {
-        url: '/',
-        priority: priority || 'medium',
-        timestamp: Date.now()
-      }
-    };
+      // Prioritize the 'tag' from the client message, fallback to 'mcm-alert'
+      tag: tag || 'mcm-alert', 
+      // Prioritize 'silent' from the client message, fallback to default false
+      silent: silent !== undefined ? silent : false, 
+      // Prioritize 'requireInteraction' from the client message, fallback to priority-based
+      requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'), 
+      // Prioritize 'vibrate' from the client message, fallback to priority-based
+      vibrate: vibrate || (priority === 'high' ? [300, 100, 300] : [200, 100, 200]), 
+      // Prioritize 'actions' from the client message, fallback to default actions
+      actions: actions || [ 
+        { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }, 
+        { action: 'dismiss', title: 'Dismiss' } 
+      ], 
+      data: { 
+        url: '/', 
+        priority: priority || 'medium', 
+        timestamp: Date.now(),
+        // Merge any additional data properties sent from the client
+        ...(data || {}) 
+      } 
+    }; 
     
     self.registration.showNotification(title, notificationOptions)
       .then(() => {
