@@ -1,28 +1,31 @@
-import { useEffect } from "react";
+// src/App.tsx
+import React, { useEffect } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { pushService } from "@/services/pushNotificationService";
 import InAppNotificationSystem from "@/components/InAppNotificationSystem";
+
+// Page Components
 import Index from "./pages/Index";
 import ApiDocumentation from "./pages/ApiDocumentation";
 import NotFound from "./pages/NotFound";
 import AllNotifications from "./pages/AllNotifications";
+// ...import other pages as needed
 
 const queryClient = new QueryClient();
 
-const App = () => {
+const App: React.FC = () => {
   useEffect(() => {
-    // Initialize push notification service when app starts
     const initializePushService = async () => {
       try {
         await pushService.initialize();
-        console.log('Push notification service initialized');
+        console.log("Push notification service initialized");
       } catch (error) {
-        console.error('Failed to initialize push notification service:', error);
+        console.error("Failed to initialize push notification service:", error);
       }
     };
 
@@ -40,10 +43,11 @@ const App = () => {
               <Route path="/" element={<Index />} />
               <Route path="/api-docs" element={<ApiDocumentation />} />
               <Route path="/notifications" element={<AllNotifications />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              {/* Add other routes above this */}
               <Route path="*" element={<NotFound />} />
             </Routes>
-            {/* In-App Notification System - positioned at the app level */}
+
+            {/* In-App Notification System */}
             <InAppNotificationSystem />
           </BrowserRouter>
         </TooltipProvider>
