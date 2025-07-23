@@ -13,6 +13,66 @@ import { Settings, Bell, Volume2 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { Badge } from '@/components/ui/badge';
 
+// Helper function to send messages to the Service Worker
+// This will resolve or reject based on the Service Worker's reply
+const sendNotificationToServiceWorker = async (notificationData: {
+  type: string;
+  title: string;
+  body: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  requireInteraction?: boolean;
+  silent?: boolean;
+  vibrate?: number[];
+  actions?: { action: string; title: string; icon?: string }[];
+  data?: any;
+}) => {
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    return new Promise((resolve, reject) => {
+      const messageChannel = new MessageChannel();
+      messageChannel.port1.onmessage = (event) => {
+        if (event.data.success) {
+          resolve(event.data);
+        } else {
+          reject(new Error(event.data.error || 'Failed to show notification via SW.'));
+        }
+      };
+
+      // Send the message to the active Service Worker
+      navigator.serviceWorker.controller.postMessage(
+        notificationData,
+        [messageChannel.port2] // Transfer port2 for the SW to reply
+      );
+    });
+  } else {
+    // Fallback for browsers without Service Worker or if it's not active
+    // You might want to display a different message or simply log a warning
+    console.warn("Service Worker not active or supported. Cannot send notification via SW.");
+    toast.info("Notifications might not work in the background. Please ensure Service Worker is active.");
+    
+    // For the immediate user experience, if SW is not available,
+    // you could still try to show a non-persistent notification on desktop
+    // but on mobile PWA, this is exactly what causes the error.
+    // For robust PWA, the expectation is SW is always there for notifications.
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(notificationData.title, {
+            body: notificationData.body,
+            icon: notificationData.icon,
+            tag: notificationData.tag,
+            requireInteraction: notificationData.requireInteraction,
+            silent: notificationData.silent,
+            vibrate: notificationData.vibrate,
+            actions: notificationData.actions,
+            data: notificationData.data
+        });
+        resolve({ success: true, message: "Displayed non-persistent notification." });
+    } else {
+        reject(new Error("Notification API not available or permission not granted."));
+    }
+  }
+};
+
 const NotificationSettingsDialog: React.FC = () => {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -36,11 +96,18 @@ const NotificationSettingsDialog: React.FC = () => {
 
         if (permission === 'granted') {
           toast.success('✅ Notifications enabled successfully!');
-          new Notification('MCM Alerts', {
+          // REFRACTORED: Send welcome notification via Service Worker
+          sendNotificationToServiceWorker({
+            type: 'SHOW_NOTIFICATION', // Matches the type in your sw.js message listener
+            title: 'MCM Alerts',
             body: 'Great! You will now receive notifications from MCM Alerts 🔔',
             icon: '/mcm-logo-192.png',
             tag: 'welcome',
             requireInteraction: false,
+            data: { url: '/' } // Optional data for the notification click
+          }).catch(error => {
+            console.error('Failed to show welcome notification via SW:', error);
+            toast.error('Failed to show welcome notification. Check Service Worker.');
           });
         } else {
           toast.error('❌ Please click "Allow" in the browser dialog to enable notifications');
@@ -55,44 +122,50 @@ const NotificationSettingsDialog: React.FC = () => {
     }
   };
 
-  const sendTestNotification = () => {
+  const sendTestNotification = async () => { // Made async
     if (Notification.permission !== 'granted') {
       toast.error('❌ Please enable notifications first by toggling the switch above');
       return;
     }
 
-    const notification = new Notification('🔔 Test Notification', {
-      body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
-      icon: '/mcm-logo-192.png',
-      tag: 'test',
-      requireInteraction: false,
-    });
+    try {
+      // REFRACTORED: Send test notification via Service Worker
+      await sendNotificationToServiceWorker({
+        type: 'SHOW_NOTIFICATION', // Matches the type in your sw.js message listener
+        title: '🔔 Test Notification',
+        body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
+        icon: '/mcm-logo-192.png',
+        tag: 'test',
+        requireInteraction: false,
+        data: { url: '/dashboard', priority: 'medium' } // Example: add data
+      });
 
-    setTimeout(() => {
-      notification.close();
-    }, 5000);
+      // Original sound playback logic (this can stay in main thread)
+      if (soundEnabled) {
+        try {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
 
-    if (soundEnabled) {
-      try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+          oscillator.type = 'sine';
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
 
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
-        oscillator.type = 'sine';
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.3);
-      } catch {
-        // Fail silently if AudioContext is unavailable
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.3);
+        } catch {
+          // Fail silently if AudioContext is unavailable
+        }
       }
-    }
 
-    toast.success('✅ Test notification sent successfully!');
+      toast.success('✅ Test notification sent successfully!');
+    } catch (error) {
+      console.error('Failed to send test notification via Service Worker:', error);
+      toast.error('Failed to send test notification. Check Service Worker and permissions.');
+    }
   };
 
   const getStatusBadge = () => {
