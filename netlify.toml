@@ -10,6 +10,12 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
+# For client-side routing (React Router / Vite SPA)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/service-worker.js"
   [headers.values]
