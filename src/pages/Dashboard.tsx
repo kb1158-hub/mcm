@@ -13,15 +13,26 @@ import { LogOut, Copy, ExternalLink, Search, Filter, Check } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
 
+interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  type?: string;
+  priority?: 'low' | 'medium' | 'high';
+  acknowledged?: boolean;
+  created_at: string;
+}
+
 const Dashboard: React.FC = () => {
   const { logout } = useAuth();
   const { toast } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -36,13 +47,13 @@ const Dashboard: React.FC = () => {
         (payload) => {
           console.log('New notification received:', payload.new);
           // Add new notification to the list
-          setNotifications(prev => [payload.new, ...prev.slice(0, 4)]);
+          setNotifications(prev => [payload.new as Notification, ...prev.slice(0, 4)]);
           // Increment unread count
           setUnreadCount(prev => prev + 1);
           
           // Show browser notification if enabled
           if ('Notification' in window && Notification.permission === 'granted') {
-            showBrowserNotification(payload.new);
+            showBrowserNotification(payload.new as Notification);
           }
         }
       )
@@ -57,8 +68,21 @@ const Dashboard: React.FC = () => {
   const markAsRead = () => {
     setUnreadCount(0);
   };
-  const showBrowserNotification = async (notification) => {
+
+  const showBrowserNotification = async (notification: Notification) => {
     try {
+      // Check if notifications are supported
+      if (!('Notification' in window)) {
+        console.warn('Browser does not support notifications');
+        return;
+      }
+
+      // Check permission
+      if (Notification.permission !== 'granted') {
+        console.warn('Notification permission not granted');
+        return;
+      }
+
       // Play sound first
       await playNotificationSound(notification.priority || 'medium');
       
@@ -77,12 +101,19 @@ const Dashboard: React.FC = () => {
         }
       });
 
+      // Handle notification click
+      browserNotification.onclick = () => {
+        window.focus();
+        browserNotification.close();
+      };
+
       // Auto-close after delay
       setTimeout(() => {
         try {
           browserNotification.close();
         } catch (e) {
           // Notification might already be closed
+          console.warn('Could not close notification:', e);
         }
       }, notification.priority === 'high' ? 10000 : 5000);
 
@@ -95,18 +126,30 @@ const Dashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Failed to show browser notification:', error);
+      // Fallback to toast only
+      toast({
+        title: `🔔 ${notification.title}`,
+        description: notification.body,
+        duration: 5000,
+      });
     }
   };
 
   const initializePushNotifications = async () => {
-    await pushService.initialize();
-    if ('Notification' in window) {
-      setNotificationsEnabled(Notification.permission === 'granted');
+    try {
+      await pushService.initialize();
+      if ('Notification' in window) {
+        setNotificationsEnabled(Notification.permission === 'granted');
+      }
+    } catch (error) {
+      console.error('Failed to initialize push notifications:', error);
+      setNotificationsEnabled(false);
     }
   };
 
   const loadRecentNotifications = async () => {
     try {
+      setIsLoading(true);
       // First try with acknowledged column, fallback without it
       const { data, error } = await supabase 
         .from('notifications')
@@ -130,6 +173,13 @@ const Dashboard: React.FC = () => {
       console.error('Failed to load notifications:', err);
       setNotifications([]);
       setUnreadCount(0);
+      toast({
+        title: "Error Loading Notifications",
+        description: "Failed to load recent notifications",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -143,6 +193,18 @@ const Dashboard: React.FC = () => {
 
   const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
     try {
+      setIsLoading(true);
+
+      // Check if notifications are supported
+      if (!('Notification' in window)) {
+        toast({
+          title: "Notifications Not Supported",
+          description: "Your browser does not support notifications",
+          variant: "destructive",
+        });
+        return;
+      }
+
       // Always request permission first to show browser dialog
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
@@ -153,6 +215,9 @@ const Dashboard: React.FC = () => {
         });
         return;
       }
+
+      // Update notifications enabled state
+      setNotificationsEnabled(true);
 
       // Send simple browser notification
       const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
@@ -168,20 +233,35 @@ const Dashboard: React.FC = () => {
         silent: false
       });
 
+      // Handle notification click
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
       // Play sound
       await playNotificationSound(priority);
 
-      // Store in database
-      await fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'test_notification',
-          title,
-          message: body,
-          priority
-        })
-      });
+      // Store in database - with error handling
+      try {
+        const response = await fetch('/api/notifications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'test_notification',
+            title,
+            message: body,
+            priority
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('API call failed, notification still shown locally');
+        }
+      } catch (apiError) {
+        console.warn('API call failed:', apiError);
+        // Continue - notification was still shown to user
+      }
 
       // Auto-close notification after delay
       setTimeout(() => {
@@ -189,6 +269,7 @@ const Dashboard: React.FC = () => {
           notification.close();
         } catch (e) {
           // Notification might already be closed
+          console.warn('Could not close test notification:', e);
         }
       }, priority === 'high' ? 10000 : 5000);
 
@@ -204,18 +285,27 @@ const Dashboard: React.FC = () => {
       console.error('Failed to send test notification:', error);
       toast({
         title: "Notification Failed",
-        description: error.message || "Please allow notifications when prompted by your browser",
+        description: error instanceof Error ? error.message : "Please allow notifications when prompted by your browser",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
     try {
+      // Check if AudioContext is supported
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) {
+        console.warn('AudioContext not supported');
+        return;
+      }
+
       const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
       const duration = priority === 'high' ? 1.0 : 0.5;
       
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioContext = new AudioContext();
       
       // Resume audio context if suspended (required for mobile)
       if (audioContext.state === 'suspended') {
@@ -236,6 +326,16 @@ const Dashboard: React.FC = () => {
       
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + duration);
+
+      // Clean up
+      setTimeout(() => {
+        try {
+          audioContext.close();
+        } catch (e) {
+          console.warn('Could not close audio context:', e);
+        }
+      }, (duration + 0.1) * 1000);
+
     } catch (error) {
       console.warn('Could not play notification sound:', error);
     }
@@ -366,10 +466,22 @@ const Dashboard: React.FC = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header unreadCount={unreadCount} />
-      <div className="container mx-auto px-4 py-6">
-        {/* Header with Logout */}
-        <div className="flex items-center justify-end mb-6">
-          <Button onClick={handleLogout} variant="outline" className="flex items-center space-x-2">
+      
+      {/* Fixed main container with proper spacing */}
+      <main className="container mx-auto px-4 py-8">
+        {/* Fixed header section with proper spacing and alignment */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-muted-foreground mt-1">
+              Manage your notifications and monitor system status
+            </p>
+          </div>
+          <Button 
+            onClick={handleLogout} 
+            variant="outline" 
+            className="flex items-center gap-2 hover:bg-destructive hover:text-destructive-foreground transition-colors"
+          >
             <LogOut className="h-4 w-4" />
             <span>Logout</span>
           </Button>
@@ -386,20 +498,22 @@ const Dashboard: React.FC = () => {
               <CardHeader>
                 <CardTitle>API Integration</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-4">
                 <p className="text-muted-foreground">
                   Send notifications via API:
                 </p>
                 <div className="bg-muted p-4 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
-                    <code className="text-sm font-mono">POST {window.location.origin}/api/notifications</code>
+                    <code className="text-sm font-mono break-all">
+                      POST {window.location.origin}/api/notifications
+                    </code>
                     <Button variant="ghost" size="sm" onClick={copyApiUrl}>
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
                 <Link to="/api-docs">
-                  <Button variant="outline" className="flex items-center space-x-2">
+                  <Button variant="outline" className="flex items-center gap-2">
                     <ExternalLink className="h-4 w-4" />
                     <span>API Documentation</span>
                   </Button>
@@ -412,8 +526,8 @@ const Dashboard: React.FC = () => {
           <div className="space-y-6">
             {/* Recent Notifications */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-                <div className="flex items-center justify-between w-full">
+              <CardHeader className="pb-4">
+                <div className="flex items-center justify-between">
                   <CardTitle>Recent Notifications</CardTitle>
                   <div className="flex items-center gap-2">
                     {unreadCount > 0 && (
@@ -422,6 +536,7 @@ const Dashboard: React.FC = () => {
                         size="sm"
                         variant="outline"
                         className="text-xs h-8"
+                        disabled={isLoading}
                       >
                         <Check className="h-3 w-3 mr-1" />
                         Mark All Read
@@ -439,7 +554,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </CardHeader>
               
-              {/* Search and Filter Controls - Improved Layout */}
+              {/* Search and Filter Controls - Fixed Layout */}
               <div className="px-6 pb-4 space-y-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -452,7 +567,7 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <Select value={filterType} onValueChange={setFilterType}>
-                    <SelectTrigger className="w-[140px] h-9">
+                    <SelectTrigger className="flex-1 h-9">
                       <Filter className="h-4 w-4 mr-2" />
                       <SelectValue placeholder="Type" />
                     </SelectTrigger>
@@ -467,7 +582,7 @@ const Dashboard: React.FC = () => {
                   </Select>
                   
                   <Select value={filterPriority} onValueChange={setFilterPriority}>
-                    <SelectTrigger className="w-[140px] h-9">
+                    <SelectTrigger className="flex-1 h-9">
                       <SelectValue placeholder="Priority" />
                     </SelectTrigger>
                     <SelectContent>
@@ -481,13 +596,20 @@ const Dashboard: React.FC = () => {
               </div>
               
               <CardContent onClick={markAsRead}>
-                {filteredNotifications.length === 0 ? (
+                {isLoading ? (
+                  <div className="text-center py-6">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                    <p className="text-sm mt-2 text-muted-foreground">Loading notifications...</p>
+                  </div>
+                ) : filteredNotifications.length === 0 ? (
                   <div className="text-center py-6">
                     {searchTerm || filterType !== "all" || filterPriority !== "all" ? (
                       <>
                         <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p>No notifications match your filters</p>
-                        <p className="text-sm">Try adjusting your search or filters</p>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          Try adjusting your search or filters
+                        </p>
                       </>
                     ) : (
                       <>
@@ -499,7 +621,7 @@ const Dashboard: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {filteredNotifications.map((n) => (
                       <div 
                         key={n.id} 
@@ -510,15 +632,15 @@ const Dashboard: React.FC = () => {
                         }`}
                       >
                         <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="font-semibold text-sm">{n.title}</div>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="font-semibold text-sm truncate">{n.title}</div>
                             {!n.acknowledged && (
-                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium">
+                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium flex-shrink-0">
                                 New
                               </Badge>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             <Badge 
                               variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}
                               className="text-xs"
@@ -527,7 +649,10 @@ const Dashboard: React.FC = () => {
                             </Badge>
                             {!n.acknowledged && (
                               <Button
-                                onClick={() => acknowledgeNotification(n.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  acknowledgeNotification(n.id);
+                                }}
                                 size="sm"
                                 variant="outline"
                                 className="h-7 w-7 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-200"
@@ -560,26 +685,54 @@ const Dashboard: React.FC = () => {
                 <CardTitle className="text-center">🔔 Test Notifications</CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
-                <Button onClick={() => sendTestNotification('medium')} className="w-full mb-4 bg-primary hover:bg-primary/90">
-                  Test Notification
+                <Button 
+                  onClick={() => sendTestNotification('medium')} 
+                  className="w-full mb-4 bg-primary hover:bg-primary/90"
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Sending..." : "Test Notification"}
                 </Button>
                 <div className="grid grid-cols-3 gap-2">
-                  <Button variant="outline" size="sm" onClick={() => sendTestNotification('low')} className="text-xs">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => sendTestNotification('low')} 
+                    className="text-xs"
+                    disabled={isLoading}
+                  >
                     Low
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => sendTestNotification('medium')} className="text-xs">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => sendTestNotification('medium')} 
+                    className="text-xs"
+                    disabled={isLoading}
+                  >
                     Medium
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => sendTestNotification('high')} className="text-xs">
+                  <Button 
+                    variant="destructive" 
+                    size="sm" 
+                    onClick={() => sendTestNotification('high')} 
+                    className="text-xs"
+                    disabled={isLoading}
+                  >
                     High
                   </Button>
                 </div>
+                {!notificationsEnabled && (
+                  <p className="text-xs text-muted-foreground mt-2 text-center">
+                    Click test to enable notifications
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
+
 export default Dashboard;
