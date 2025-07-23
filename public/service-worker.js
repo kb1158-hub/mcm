@@ -1,5 +1,28 @@
 // MCM Alerts Service Worker with Enhanced Mobile Background Notifications
 
+// Import necessary Workbox modules
+import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
+import { ExpirationPlugin } from 'workbox-expiration';
+
+// This is the array of URLs that vite-plugin-pwa will inject automatically.
+// DO NOT DEFINE `const urlsToCache = [...]` manually here anymore.
+// The `self.__WB_MANIFEST` placeholder is filled by `vite-plugin-pwa` during the build process.
+precacheAndRoute(self.__WB_MANIFEST);
+
+// Optional: Clean up old Workbox caches immediately on activation.
+// This helps ensure users get the latest version quickly.
+cleanupOutdatedCaches();
+
+console.log('Service Worker loaded successfully with mobile background notification support');
+
+// --- REMOVE YOUR OLD CACHING LOGIC ---
+// The following sections should be DELETED or COMMENTED OUT.
+// Workbox's `precacheAndRoute` handles these automatically for your built assets.
+
+/*
+// REMOVE THIS BLOCK (manual urlsToCache)
 const CACHE_NAME = 'mcm-alerts-v3';
 const urlsToCache = [
   '/',
@@ -8,7 +31,7 @@ const urlsToCache = [
   '/mcm-logo-512.png'
 ];
 
-// Install event - cache resources
+// REMOVE THIS BLOCK (manual install event)
 self.addEventListener('install', event => {
   console.log('Service Worker installing...');
   event.waitUntil(
@@ -24,13 +47,14 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// Activate event - cleanup old caches and take control immediately
+// REMOVE THIS BLOCK (manual activate event, or adapt it if you have *other* cleanup)
+// Workbox's cleanupOutdatedCaches() provides a good default.
 self.addEventListener('activate', event => {
   console.log('Service Worker activating...');
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.map(key => {
-        if (key !== CACHE_NAME) {
+        if (key !== CACHE_NAME) { // CACHE_NAME will be 'mcm-alerts-v3'
           console.log('Deleting old cache:', key);
           return caches.delete(key);
         }
@@ -40,7 +64,7 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Fetch event - serve cached resources, fallback to network
+// REMOVE THIS BLOCK (manual fetch event for precached assets)
 self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
@@ -53,6 +77,11 @@ self.addEventListener('fetch', event => {
       })
   );
 });
+*/
+
+// --- Your existing push notification and message handling logic (KEEP THIS) ---
+// These custom event listeners are not directly managed by Workbox's precaching,
+// so they should remain in your service-worker.js file.
 
 // Enhanced push event for mobile background notifications
 self.addEventListener('push', event => {
@@ -86,7 +115,6 @@ self.addEventListener('push', event => {
         data: { ...notificationData.data, ...data.data }
       };
 
-      // Set priority-based options for mobile
       if (data.priority === 'high') {
         notificationData.requireInteraction = true;
         notificationData.vibrate = [300, 100, 300, 100, 300];
@@ -104,7 +132,6 @@ self.addEventListener('push', event => {
   }
 
   event.waitUntil(
-    // Use ServiceWorkerRegistration.showNotification for mobile compatibility
     self.registration.showNotification(notificationData.title, {
       body: notificationData.body,
       icon: notificationData.icon,
@@ -118,7 +145,6 @@ self.addEventListener('push', event => {
     }).then(() => {
       console.log('Background notification displayed successfully');
 
-      // Send message to all clients to play sound
       return self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
         clients.forEach(client => {
           client.postMessage({
@@ -148,13 +174,11 @@ self.addEventListener('notificationclick', event => {
     event.waitUntil(
       clients.matchAll({ type: 'window', includeUncontrolled: true })
         .then(clientList => {
-          // Check if there's already a window/tab open
           for (const client of clientList) {
             if (client.url.includes(targetUrl) && 'focus' in client) {
               return client.focus();
             }
           }
-          // If no window/tab is open, open a new one
           if (clients.openWindow) {
             return clients.openWindow(targetUrl);
           }
@@ -171,47 +195,40 @@ self.addEventListener('message', event => {
   console.log('Service Worker received message:', event.data);
 
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    // Instead of destructuring only a few, pull out all relevant properties
-    const { 
-        title, 
-        body, 
-        icon, 
-        badge, 
-        priority, 
-        tag, // <-- Now properly destructured
-        requireInteraction, // <-- Now properly destructured
-        silent, // <-- Now properly destructured
-        vibrate, // <-- Now properly destructured
-        actions, // <-- Now properly destructured
-        data // <-- Now properly destructured
+    const {
+        title,
+        body,
+        icon,
+        badge,
+        priority,
+        tag,
+        requireInteraction,
+        silent,
+        vibrate,
+        actions,
+        data
     } = event.data;
 
     const notificationOptions = {
       body,
       icon: icon || '/mcm-logo-192.png',
       badge: badge || '/mcm-logo-192.png',
-      // Prioritize the 'tag' from the client message, fallback to 'mcm-alert'
-      tag: tag || 'mcm-alert', 
-      // Prioritize 'silent' from the client message, fallback to default false
-      silent: silent !== undefined ? silent : false, 
-      // Prioritize 'requireInteraction' from the client message, fallback to priority-based
-      requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'), 
-      // Prioritize 'vibrate' from the client message, fallback to priority-based
-      vibrate: vibrate || (priority === 'high' ? [300, 100, 300] : [200, 100, 200]), 
-      // Prioritize 'actions' from the client message, fallback to default actions
-      actions: actions || [ 
-        { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }, 
-        { action: 'dismiss', title: 'Dismiss' } 
-      ], 
-      data: { 
-        url: '/', 
-        priority: priority || 'medium', 
+      tag: tag || 'mcm-alert',
+      silent: silent !== undefined ? silent : false,
+      requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'),
+      vibrate: vibrate || (priority === 'high' ? [300, 100, 300] : [200, 100, 200]),
+      actions: actions || [
+        { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+        { action: 'dismiss', title: 'Dismiss' }
+      ],
+      data: {
+        url: '/',
+        priority: priority || 'medium',
         timestamp: Date.now(),
-        // Merge any additional data properties sent from the client
-        ...(data || {}) 
-      } 
-    }; 
-    
+        ...(data || {})
+      }
+    };
+
     self.registration.showNotification(title, notificationOptions)
       .then(() => {
         console.log('Manual notification displayed successfully');
@@ -232,5 +249,3 @@ self.addEventListener('message', event => {
 self.addEventListener('notificationclose', event => {
   console.log('Notification closed:', event.notification.tag);
 });
-
-console.log('Service Worker loaded successfully with mobile background notification support');
