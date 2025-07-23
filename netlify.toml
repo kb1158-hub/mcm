@@ -5,23 +5,137 @@
 [functions]
   directory = "netlify/functions"
 
+# API redirects - specific routes first
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# For client-side routing (React Router / Vite SPA)
+# Static asset handling - ensure CSS, JS, images aren't redirected
+[[redirects]]
+  from = "*.css"
+  to = "*.css"
+  status = 200
+
+[[redirects]]
+  from = "*.js"
+  to = "*.js"
+  status = 200
+
+[[redirects]]
+  from = "*.png"
+  to = "*.png"
+  status = 200
+
+[[redirects]]
+  from = "*.jpg"
+  to = "*.jpg"
+  status = 200
+
+[[redirects]]
+  from = "*.jpeg"
+  to = "*.jpeg"
+  status = 200
+
+[[redirects]]
+  from = "*.gif"
+  to = "*.gif"
+  status = 200
+
+[[redirects]]
+  from = "*.svg"
+  to = "*.svg"
+  status = 200
+
+[[redirects]]
+  from = "*.ico"
+  to = "*.ico"
+  status = 200
+
+[[redirects]]
+  from = "*.woff"
+  to = "*.woff"
+  status = 200
+
+[[redirects]]
+  from = "*.woff2"
+  to = "*.woff2"
+  status = 200
+
+# For client-side routing (React Router / Vite SPA) - MUST be last
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+  force = false
 
+# Headers for service worker
 [[headers]]
   for = "/service-worker.js"
   [headers.values]
     Cache-Control = "no-cache"
     Service-Worker-Allowed = "/"
 
+# Headers for CSS files - ensure proper MIME type
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Content-Type = "text/css"
+    Cache-Control = "public, max-age=31536000"
+    X-Content-Type-Options = "nosniff"
+
+# Headers for JavaScript files
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Content-Type = "application/javascript"
+    Cache-Control = "public, max-age=31536000"
+
+# Headers for static assets
+[[headers]]
+  for = "*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "*.jpeg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "*.gif"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+    Content-Type = "image/svg+xml"
+
+[[headers]]
+  for = "*.ico"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "*.woff"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+    Content-Type = "font/woff"
+
+[[headers]]
+  for = "*.woff2"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+    Content-Type = "font/woff2"
+
+# Global security headers
 [[headers]]
   for = "/*"
   [headers.values]
