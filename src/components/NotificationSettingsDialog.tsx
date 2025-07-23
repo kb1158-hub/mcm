@@ -199,12 +199,14 @@ const sendNotificationToServiceWorker = async (notificationData: {
       );
     });
   } else {
-    // Fallback: Try Notification API if available and allowed and not in PWA/mobile
+    // Only use Notification API on desktop, NOT mobile/PWA/standalone
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
     if (
       'Notification' in window &&
       Notification.permission === 'granted' &&
-      !window.matchMedia('(display-mode: standalone)').matches && // Not PWA
-      !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) // Not mobile
+      !isMobile &&
+      !isStandalone
     ) {
       try {
         new Notification(notificationData.title, {
@@ -219,12 +221,12 @@ const sendNotificationToServiceWorker = async (notificationData: {
         });
         return Promise.resolve({ success: true, message: "Displayed non-persistent notification." });
       } catch (error) {
-        // Most likely an illegal constructor error
+        // Fallback if Notification throws
         toast.error("Unable to display notification. Please enable notifications in your browser settings.");
         return Promise.reject(error);
       }
     } else {
-      // Last resort: Toast/in-app notification
+      // In-app fallback for unsupported cases
       toast.info("Notifications may not work in the background on your device. Please ensure Service Worker is active or use a supported browser.");
       return Promise.resolve({ success: false, message: "Used fallback notification." });
     }
