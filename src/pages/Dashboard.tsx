@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
-import { LogOut, Copy, ExternalLink } from 'lucide-react';
+import { LogOut, Copy, ExternalLink, Search, Filter, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
 
@@ -17,6 +19,9 @@ const Dashboard: React.FC = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [filterPriority, setFilterPriority] = useState("all");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -102,10 +107,18 @@ const Dashboard: React.FC = () => {
 
   const loadRecentNotifications = async () => {
     try {
-      const data = await fetchRecentNotifications();
+      const { data, error } = await supabase 
+        .from('notifications')
+        .select('*, acknowledged')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        throw error;
+      }
+
       setNotifications(data || []);
-      // Reset unread count when loading notifications
-      setUnreadCount(0);
+      setUnreadCount(data?.filter(n => !n.acknowledged).length || 0);
     } catch (err) {
       setNotifications([]);
     }
@@ -219,6 +232,81 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const acknowledgeNotification = async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ acknowledged: true })
+        .eq('id', notificationId);
+
+      if (error) throw error;
+
+      // Update local state
+      setNotifications(prev => 
+        prev.map(n => 
+          n.id === notificationId 
+            ? { ...n, acknowledged: true }
+            : n
+        )
+      );
+
+      // Update unread count
+      setUnreadCount(prev => Math.max(0, prev - 1));
+
+      toast({
+        title: "✅ Notification Acknowledged",
+        description: "Notification has been marked as read",
+      });
+    } catch (error) {
+      console.error('Error acknowledging notification:', error);
+      toast({
+        title: "❌ Error",
+        description: "Failed to acknowledge notification",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const acknowledgeAllNotifications = async () => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ acknowledged: true })
+        .eq('acknowledged', false);
+
+      if (error) throw error;
+
+      // Update local state
+      setNotifications(prev => 
+        prev.map(n => ({ ...n, acknowledged: true }))
+      );
+      setUnreadCount(0);
+
+      toast({
+        title: "✅ All Notifications Acknowledged",
+        description: "All notifications have been marked as read",
+      });
+    } catch (error) {
+      console.error('Error acknowledging all notifications:', error);
+      toast({
+        title: "❌ Error",
+        description: "Failed to acknowledge all notifications",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Filter notifications based on search and filters
+  const filteredNotifications = notifications.filter(notification => {
+    const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         notification.body.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesType = filterType === "all" || notification.type === filterType;
+    const matchesPriority = filterPriority === "all" || notification.priority === filterPriority;
+    
+    return matchesSearch && matchesType && matchesPriority;
+  });
+
   const copyApiUrl = () => {
     const apiUrl = `${window.location.origin}/api/notifications`;
     navigator.clipboard.writeText(apiUrl);
@@ -288,31 +376,127 @@ const Dashboard: React.FC = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <CardTitle>Recent Notifications</CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => { navigate('/notifications'); markAsRead(); }}>
-                  View All
-                </Button>
+                <div className="flex gap-2">
+                  {unreadCount > 0 && (
+                    <Button
+                      onClick={acknowledgeAllNotifications}
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      Mark All Read
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => { navigate('/notifications'); markAsRead(); }}>
+                    View All
+                  </Button>
+                </div>
+                
+                {/* Search and Filter Controls */}
+                <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search notifications..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Select value={filterType} onValueChange={setFilterType}>
+                      <SelectTrigger className="w-32">
+                        <Filter className="h-4 w-4 mr-1" />
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Types</SelectItem>
+                        <SelectItem value="test">Test</SelectItem>
+                        <SelectItem value="alert">Alert</SelectItem>
+                        <SelectItem value="warning">Warning</SelectItem>
+                        <SelectItem value="info">Info</SelectItem>
+                        <SelectItem value="custom">Custom</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    <Select value={filterPriority} onValueChange={setFilterPriority}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="Priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Priority</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent onClick={markAsRead}>
-                {notifications.length === 0 ? (
+                {filteredNotifications.length === 0 ? (
                   <div className="text-center py-6">
-                    <p className="text-muted-foreground">No notifications yet</p>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Test notifications to see them here
-                    </p>
+                    {searchTerm || filterType !== "all" || filterPriority !== "all" ? (
+                      <>
+                        <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p>No notifications match your filters</p>
+                        <p className="text-sm">Try adjusting your search or filters</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-muted-foreground">No notifications yet</p>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          Test notifications to see them here
+                        </p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {notifications.map((n) => (
-                      <div key={n.id} className="p-3 bg-muted/30 rounded-lg border-l-4 border-l-primary">
+                    {filteredNotifications.map((n) => (
+                      <div 
+                        key={n.id} 
+                        className={`p-3 rounded-lg border-l-4 border-l-primary transition-all duration-200 ${
+                          !n.acknowledged 
+                            ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100' 
+                            : 'bg-muted/30'
+                        }`}
+                      >
                         <div className="flex items-center justify-between mb-1">
-                          <div className="font-medium text-sm">{n.title}</div>
-                          <Badge variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}>
-                            {n.priority || 'medium'}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <div className="font-medium text-sm">{n.title}</div>
+                            {!n.acknowledged && (
+                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                                New
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}>
+                              {n.priority || 'medium'}
+                            </Badge>
+                            {!n.acknowledged && (
+                              <Button
+                                onClick={() => acknowledgeNotification(n.id)}
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                              >
+                                <Check className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
                         <div className="text-sm text-muted-foreground mt-1">{n.body}</div>
-                        <div className="text-xs text-muted-foreground mt-2">
+                        <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
                           {new Date(n.created_at).toLocaleString()}
+                          {n.acknowledged && (
+                            <span className="flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              Read
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
