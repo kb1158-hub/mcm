@@ -18,24 +18,16 @@ const AllNotifications: React.FC = () => {
         {notifications.length === 0 ? (
           <p>No notifications found.</p>
         ) : (
-          <div
-            style={{
-              maxHeight: '300px',  // max height for scrolling
-              overflowY: 'auto',
-              paddingRight: '8px',  // optional space for scrollbar
-            }}
-          >
-            <div className="space-y-3">
-              {notifications.map((n) => (
-                <div key={n.id} className="p-4 bg-muted/50 rounded-lg border">
-                  <div className="font-semibold text-foreground mb-2">{n.title}</div>
-                  <div className="text-muted-foreground mb-3">{n.body}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {new Date(n.created_at).toLocaleString()}
-                  </div>
+          <div className="space-y-3">
+            {notifications.map((n) => (
+              <div key={n.id} className="p-4 bg-muted/50 rounded-lg border">
+                <div className="font-semibold text-foreground mb-2">{n.title}</div>
+                <div className="text-muted-foreground mb-3">{n.body}</div>
+                <div className="text-xs text-muted-foreground">
+                  {new Date(n.created_at).toLocaleString()}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>
