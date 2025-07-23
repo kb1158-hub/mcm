@@ -54,6 +54,25 @@ This guide will walk you through deploying the MCM Alerts application to Netlify
    CREATE POLICY "Allow public read on subscriptions" ON subscriptions FOR SELECT USING (true);
    CREATE POLICY "Allow public insert on subscriptions" ON subscriptions FOR INSERT WITH CHECK (true);
    CREATE POLICY "Allow public delete on subscriptions" ON subscriptions FOR DELETE USING (true);
+
+    -- Create topics table
+    CREATE TABLE topics (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      enabled BOOLEAN DEFAULT TRUE,
+      last_checked TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    -- Enable Row Level Security for topics
+    ALTER TABLE topics ENABLE ROW LEVEL SECURITY;
+
+    -- Create policies for public access (adjust as needed for your security requirements)
+    CREATE POLICY "Allow public read on topics" ON topics FOR SELECT USING (true);
+    CREATE POLICY "Allow public insert on topics" ON topics FOR INSERT WITH CHECK (true);
+    CREATE POLICY "Allow public update on topics" ON topics FOR UPDATE USING (true);
+    CREATE POLICY "Allow public delete on topics" ON topics FOR DELETE USING (true);
    ```
 
 3. **Get your Supabase credentials:**
