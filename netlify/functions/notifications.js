@@ -55,10 +55,9 @@ exports.handler = async (event, context) => {
             type: type || 'custom',
             priority,
             metadata: otherData,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            acknowledged: false
           }
-          priority,
-          acknowledged: false
         ])
         .select();
 

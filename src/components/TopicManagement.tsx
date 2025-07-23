@@ -43,12 +43,17 @@ const TopicManagement: React.FC = () => {
 
   const loadTopics = async () => {
     try {
+      // First check if topics table exists, if not use default topics
       const { data, error } = await supabase
         .from('topics')
         .select('*')
         .order('created_at', { ascending: false });
       
-      if (error) throw error;
+      if (error) {
+        console.error('Failed to load topics:', error);
+        // Keep default topics if database table doesn't exist
+        return;
+      }
       
       if (data && data.length > 0) {
         const formattedTopics = data.map(topic => ({
@@ -63,6 +68,7 @@ const TopicManagement: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to load topics:', error);
+      // Keep default topics on error
     }
   };
   const handleCreateTopic = async () => {

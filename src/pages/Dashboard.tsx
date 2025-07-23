@@ -107,9 +107,10 @@ const Dashboard: React.FC = () => {
 
   const loadRecentNotifications = async () => {
     try {
+      // First try with acknowledged column, fallback without it
       const { data, error } = await supabase 
         .from('notifications')
-        .select('*, acknowledged')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -117,10 +118,18 @@ const Dashboard: React.FC = () => {
         throw error;
       }
 
-      setNotifications(data || []);
-      setUnreadCount(data?.filter(n => !n.acknowledged).length || 0);
+      // Handle notifications with or without acknowledged column
+      const notificationsWithAck = (data || []).map(n => ({
+        ...n,
+        acknowledged: n.acknowledged || false
+      }));
+      
+      setNotifications(notificationsWithAck);
+      setUnreadCount(notificationsWithAck.filter(n => !n.acknowledged).length);
     } catch (err) {
+      console.error('Failed to load notifications:', err);
       setNotifications([]);
+      setUnreadCount(0);
     }
   };
 
