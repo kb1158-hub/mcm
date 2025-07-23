@@ -9,7 +9,7 @@ import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
 import { LogOut, Copy, ExternalLink } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { fetchRecentNotifications, addNotification } from '@/services/notificationService';
+import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
 
 const Dashboard: React.FC = () => {
   const { logout } = useAuth();
@@ -21,7 +21,70 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     initializePushNotifications();
     loadRecentNotifications();
+    
+    // Set up real-time subscription for notifications
+    const subscription = supabase
+      .channel('notifications')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        (payload) => {
+          console.log('New notification received:', payload.new);
+          // Add new notification to the list
+          setNotifications(prev => [payload.new, ...prev.slice(0, 4)]);
+          
+          // Show browser notification if enabled
+          if ('Notification' in window && Notification.permission === 'granted') {
+            showBrowserNotification(payload.new);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
+
+  const showBrowserNotification = async (notification) => {
+    try {
+      // Play sound first
+      await playNotificationSound(notification.priority || 'medium');
+      
+      // Show browser notification
+      const browserNotification = new Notification(notification.title, {
+        body: notification.body,
+        icon: '/mcm-logo-192.png',
+        badge: '/mcm-logo-192.png',
+        tag: 'mcm-realtime',
+        requireInteraction: notification.priority === 'high',
+        silent: false,
+        vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+        data: {
+          priority: notification.priority,
+          timestamp: Date.now()
+        }
+      });
+
+      // Auto-close after delay
+      setTimeout(() => {
+        try {
+          browserNotification.close();
+        } catch (e) {
+          // Notification might already be closed
+        }
+      }, notification.priority === 'high' ? 10000 : 5000);
+
+      // Show toast notification
+      toast({
+        title: `🔔 ${notification.title}`,
+        description: notification.body,
+        duration: 5000,
+      });
+
+    } catch (error) {
+      console.error('Failed to show browser notification:', error);
+    }
+  };
 
   const initializePushNotifications = async () => {
     await pushService.initialize();

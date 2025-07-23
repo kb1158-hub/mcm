@@ -244,33 +244,15 @@ export class PushNotificationService {
     // Play sound immediately for better mobile support
     await this.playNotificationSound(priority);
 
-    // Try service worker notification first (for production)
+    // Use service worker notification for better mobile support
     if (!this.isStackBlitz && this.registration) {
       try {
-        const sw = this.registration.active || this.registration.waiting || this.registration.installing;
-        if (sw) {
-          sw.postMessage({
-            type: 'SHOW_NOTIFICATION',
-            title,
-            body,
-            icon: '/mcm-logo-192.png',
-            badge: '/mcm-logo-192.png',
-            priority: priority
-          });
-        }
-      } catch (error) {
-        console.error('Service worker notification failed:', error);
-      }
-    }
-
-    // Enhanced browser notification with mobile support
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        const notification = new Notification(title, {
+        // Use ServiceWorkerRegistration.showNotification for mobile compatibility
+        await this.registration.showNotification(title, {
           body,
           icon: '/mcm-logo-192.png',
           badge: '/mcm-logo-192.png',
-          silent: false, // Never silent for sound support
+          silent: false,
           requireInteraction: priority === 'high',
           tag: 'mcm-test-notification',
           vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
@@ -283,23 +265,15 @@ export class PushNotificationService {
             timestamp: Date.now()
           }
         });
-
-        // Auto-close after delay for low/medium priority
-        if (priority !== 'high') {
-          setTimeout(() => {
-            notification.close();
-          }, 5000);
-        }
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-
-        console.log('Browser notification sent successfully');
+        console.log('Service worker notification sent successfully');
       } catch (error) {
-        console.error('Browser notification failed:', error);
+        console.error('Service worker notification failed:', error);
+        // Fallback to regular browser notification
+        this.showFallbackNotification(title, body, priority);
       }
+    } else {
+      // Fallback for environments without service worker
+      this.showFallbackNotification(title, body, priority);
     }
 
     // Store notification in backend
@@ -327,6 +301,49 @@ export class PushNotificationService {
     } catch (error) {
       console.error('Failed to store notification in backend:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Fallback notification method for environments without service worker
+   */
+  private showFallbackNotification(title: string, body: string, priority: 'low' | 'medium' | 'high') {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const notification = new Notification(title, {
+          body,
+          icon: '/mcm-logo-192.png',
+          badge: '/mcm-logo-192.png',
+          silent: false,
+          requireInteraction: priority === 'high',
+          tag: 'mcm-test-notification',
+          vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+          data: {
+            priority: priority,
+            timestamp: Date.now()
+          }
+        });
+
+        // Auto-close after delay for low/medium priority
+        if (priority !== 'high') {
+          setTimeout(() => {
+            try {
+              notification.close();
+            } catch (e) {
+              // Notification might already be closed
+            }
+          }, 5000);
+        }
+
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+
+        console.log('Fallback browser notification sent successfully');
+      } catch (error) {
+        console.error('Fallback browser notification failed:', error);
+      }
     }
   }
 
