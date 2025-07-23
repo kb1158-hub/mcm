@@ -215,7 +215,6 @@ const sendNotificationToServiceWorker = async (notificationData: {
             data: notificationData.data
         });
         // Resolve the promise here, as the notification is displayed directly
-        // This was missing in the original code for this branch
         return Promise.resolve({ success: true, message: "Displayed non-persistent notification." });
     } else {
         return Promise.reject(new Error("Notification API not available or permission not granted."));
@@ -311,7 +310,7 @@ const NotificationSettingsDialog: React.FC = () => {
           // Send dual notification (both browser and in-app)
           NotificationService.sendDualNotification({
             title: 'MCM Alerts',
-            message: 'Great! You will now receive notifications from MCM Alerts 🔔',
+            message: 'Great! You will now receive notifications from MCM Alerts �',
             type: 'success',
             browserOptions: {
               tag: 'welcome',
@@ -349,7 +348,7 @@ const NotificationSettingsDialog: React.FC = () => {
         await sendNotificationToServiceWorker({
           type: 'SHOW_NOTIFICATION',
           title: '🔔 Test Notification',
-          body: 'This is a test notification from MCM Alerts! Everything is working perfectly. �',
+          body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
           icon: '/mcm-logo-192.png',
           tag: 'test',
           requireInteraction: false,
@@ -565,4 +564,3 @@ const NotificationApp: React.FC = () => {
 };
 
 export default NotificationApp;
-�
