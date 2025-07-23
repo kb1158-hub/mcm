@@ -214,9 +214,11 @@ const sendNotificationToServiceWorker = async (notificationData: {
             actions: notificationData.actions,
             data: notificationData.data
         });
-        resolve({ success: true, message: "Displayed non-persistent notification." });
+        // Resolve the promise here, as the notification is displayed directly
+        // This was missing in the original code for this branch
+        return Promise.resolve({ success: true, message: "Displayed non-persistent notification." });
     } else {
-        reject(new Error("Notification API not available or permission not granted."));
+        return Promise.reject(new Error("Notification API not available or permission not granted."));
     }
   }
 };
@@ -347,7 +349,7 @@ const NotificationSettingsDialog: React.FC = () => {
         await sendNotificationToServiceWorker({
           type: 'SHOW_NOTIFICATION',
           title: '🔔 Test Notification',
-          body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
+          body: 'This is a test notification from MCM Alerts! Everything is working perfectly. �',
           icon: '/mcm-logo-192.png',
           tag: 'test',
           requireInteraction: false,
@@ -538,19 +540,12 @@ const App: React.FC = () => {
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Bell className="h-6 w-6" />
-          MCM Alerts Notification System
-        </h2>
+      <div className="flex items-center justify-end mb-6"> {/* Changed justify-between to justify-end */}
         <NotificationSettingsDialog />
       </div>
       
       <div className="space-y-4">
-        <p className="text-gray-600">
-          This system provides both browser notifications (for background alerts) 
-          and in-app notifications (for immediate feedback while using the app).
-        </p>
+        {/* Removed the descriptive paragraph */}
         
         <Button onClick={sendDemoNotifications} className="w-full">
           Send Demo Notifications
@@ -570,3 +565,4 @@ const NotificationApp: React.FC = () => {
 };
 
 export default NotificationApp;
+�
