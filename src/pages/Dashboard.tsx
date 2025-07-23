@@ -243,12 +243,27 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeNotification = async (notificationId: string) => {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ acknowledged: true })
-        .eq('id', notificationId);
+      // Try to update via API first
+      const response = await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: notificationId,
+          acknowledged: true
+        })
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        // Fallback to direct Supabase update
+        const { error } = await supabase
+          .from('notifications')
+          .update({ acknowledged: true })
+          .eq('id', notificationId);
+
+        if (error) throw error;
+      }
 
       // Update local state
       setNotifications(prev => 
@@ -278,12 +293,26 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeAllNotifications = async () => {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ acknowledged: true })
-        .eq('acknowledged', false);
+      // Try to update via API first
+      const response = await fetch('/api/notifications', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          acknowledgeAll: true
+        })
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        // Fallback to direct Supabase update
+        const { error } = await supabase
+          .from('notifications')
+          .update({ acknowledged: true })
+          .eq('acknowledged', false);
+
+        if (error) throw error;
+      }
 
       // Update local state
       setNotifications(prev => 
@@ -384,65 +413,73 @@ const Dashboard: React.FC = () => {
             {/* Recent Notifications */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-                <CardTitle>Recent Notifications</CardTitle>
-                <div className="flex gap-2">
-                  {unreadCount > 0 && (
-                    <Button
-                      onClick={acknowledgeAllNotifications}
-                      size="sm"
-                      variant="outline"
-                      className="text-xs"
+                <div className="flex items-center justify-between w-full">
+                  <CardTitle>Recent Notifications</CardTitle>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <Button
+                        onClick={acknowledgeAllNotifications}
+                        size="sm"
+                        variant="outline"
+                        className="text-xs h-8"
+                      >
+                        <Check className="h-3 w-3 mr-1" />
+                        Mark All Read
+                      </Button>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => { navigate('/notifications'); markAsRead(); }}
+                      className="text-xs h-8"
                     >
-                      <Check className="h-3 w-3 mr-1" />
-                      Mark All Read
+                      View All
                     </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => { navigate('/notifications'); markAsRead(); }}>
-                    View All
-                  </Button>
-                </div>
-                
-                {/* Search and Filter Controls */}
-                <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Search notifications..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Select value={filterType} onValueChange={setFilterType}>
-                      <SelectTrigger className="w-32">
-                        <Filter className="h-4 w-4 mr-1" />
-                        <SelectValue placeholder="Type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Types</SelectItem>
-                        <SelectItem value="test">Test</SelectItem>
-                        <SelectItem value="alert">Alert</SelectItem>
-                        <SelectItem value="warning">Warning</SelectItem>
-                        <SelectItem value="info">Info</SelectItem>
-                        <SelectItem value="custom">Custom</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    
-                    <Select value={filterPriority} onValueChange={setFilterPriority}>
-                      <SelectTrigger className="w-32">
-                        <SelectValue placeholder="Priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Priority</SelectItem>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
               </CardHeader>
+              
+              {/* Search and Filter Controls - Improved Layout */}
+              <div className="px-6 pb-4 space-y-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search notifications..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10 h-9"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="w-[140px] h-9">
+                      <Filter className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="test">Test</SelectItem>
+                      <SelectItem value="alert">Alert</SelectItem>
+                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  
+                  <Select value={filterPriority} onValueChange={setFilterPriority}>
+                    <SelectTrigger className="w-[140px] h-9">
+                      <SelectValue placeholder="Priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priority</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
               <CardContent onClick={markAsRead}>
                 {filteredNotifications.length === 0 ? (
                   <div className="text-center py-6">
@@ -466,42 +503,45 @@ const Dashboard: React.FC = () => {
                     {filteredNotifications.map((n) => (
                       <div 
                         key={n.id} 
-                        className={`p-3 rounded-lg border-l-4 border-l-primary transition-all duration-200 ${
+                        className={`p-4 rounded-lg border transition-all duration-200 ${
                           !n.acknowledged 
-                            ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100' 
-                            : 'bg-muted/30'
+                            ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100 border-l-4 border-l-blue-500' 
+                            : 'bg-muted/30 border-border'
                         }`}
                       >
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="font-medium text-sm">{n.title}</div>
+                            <div className="font-semibold text-sm">{n.title}</div>
                             {!n.acknowledged && (
-                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium">
                                 New
                               </Badge>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}>
+                            <Badge 
+                              variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}
+                              className="text-xs"
+                            >
                               {n.priority || 'medium'}
                             </Badge>
                             {!n.acknowledged && (
                               <Button
                                 onClick={() => acknowledgeNotification(n.id)}
                                 size="sm"
-                                variant="ghost"
-                                className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100"
+                                variant="outline"
+                                className="h-7 w-7 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-200"
                               >
                                 <Check className="h-3 w-3" />
                               </Button>
                             )}
                           </div>
                         </div>
-                        <div className="text-sm text-muted-foreground mt-1">{n.body}</div>
+                        <div className="text-sm text-foreground/80 mb-2 leading-relaxed">{n.body}</div>
                         <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
                           {new Date(n.created_at).toLocaleString()}
                           {n.acknowledged && (
-                            <span className="flex items-center gap-1 text-green-600">
+                            <span className="flex items-center gap-1 text-green-600 font-medium">
                               <Check className="h-3 w-3" />
                               Read
                             </span>

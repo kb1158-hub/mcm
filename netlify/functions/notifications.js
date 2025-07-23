@@ -139,6 +139,87 @@ exports.handler = async (event, context) => {
     }
   }
 
+  if (event.httpMethod === 'PUT') {
+    try {
+      const body = JSON.parse(event.body || '{}');
+      const { id, acknowledged, acknowledgeAll } = body;
+
+      if (acknowledgeAll) {
+        // Acknowledge all notifications
+        const { error } = await supabase
+          .from('notifications')
+          .update({ acknowledged: true })
+          .eq('acknowledged', false);
+
+        if (error) {
+          console.error('Supabase error:', error);
+          return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ 
+              error: 'Failed to acknowledge all notifications',
+              details: error.message 
+            }),
+          };
+        }
+
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({ 
+            success: true,
+            message: 'All notifications acknowledged successfully'
+          }),
+        };
+      } else if (id && typeof acknowledged === 'boolean') {
+        // Acknowledge single notification
+        const { error } = await supabase
+          .from('notifications')
+          .update({ acknowledged })
+          .eq('id', id);
+
+        if (error) {
+          console.error('Supabase error:', error);
+          return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ 
+              error: 'Failed to acknowledge notification',
+              details: error.message 
+            }),
+          };
+        }
+
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({ 
+            success: true,
+            message: 'Notification acknowledged successfully'
+          }),
+        };
+      } else {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({ 
+            error: 'Invalid request body for acknowledgment'
+          }),
+        };
+      }
+    } catch (error) {
+      console.error('Error processing acknowledgment:', error);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: 'Internal server error',
+          details: error.message 
+        }),
+      };
+    }
+  }
+
   return {
     statusCode: 405,
     headers,
