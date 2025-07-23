@@ -22,12 +22,14 @@ export class PushNotificationService {
         });
         console.log('Service Worker registered:', this.registration);
 
-        await navigator.serviceWorker.ready;
+        await navigator.serviceWorker.ready; // Ensure the SW is active and ready
 
         navigator.serviceWorker.addEventListener('message', this.handleServiceWorkerMessage.bind(this));
       } catch (error) {
         console.error('Service Worker registration failed:', error);
       }
+    } else {
+      console.warn('Service Workers or PushManager not supported in this browser.');
     }
 
     this.initializeAudio();
@@ -45,9 +47,21 @@ export class PushNotificationService {
     if (event.data?.type === 'PLAY_NOTIFICATION_SOUND') {
       this.playNotificationSound(event.data.priority);
     }
+    // Optionally, handle a response from the service worker after it displays the notification
+    // if (event.data?.type === 'NOTIFICATION_DISPLAYED_CONFIRMATION') {
+    //   console.log('Service Worker confirmed notification display.');
+    // }
   }
 
   private async playNotificationSound(priority: 'low' | 'medium' | 'high' = 'medium') {
+    // Check if the page is visible to avoid playing sound if the app is in the background
+    // and the SW handles the actual notification sound via vibrate option.
+    // This can prevent double sounds.
+    if (document.visibilityState !== 'visible' && ('serviceWorker' in navigator)) {
+        console.log('Page not visible, letting Service Worker handle sound/vibration.');
+        return;
+    }
+
     try {
       const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
       const duration = priority === 'high' ? 1000 : 500;
@@ -181,9 +195,9 @@ export class PushNotificationService {
     return outputArray;
   }
 
-  async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
+  async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium', customBody?: string, tag?: string): Promise<void> {
     const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
-    const body = `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
+    const body = customBody || `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
 
     const hasPermission = await this.requestPermission();
     if (!hasPermission) {
@@ -191,30 +205,57 @@ export class PushNotificationService {
       throw new Error('Notification permission not granted');
     }
 
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
-    }
-
-    await this.playNotificationSound(priority);
-
+    // Always attempt to send to Service Worker first
     if (!this.isStackBlitz && this.registration) {
       try {
         const reg = await navigator.serviceWorker.ready;
-        reg.active?.postMessage({
+        
+        // Construct notification data to send to Service Worker
+        const notificationData = {
           type: 'SHOW_NOTIFICATION',
           title,
           body,
-          priority
-        });
-        console.log('Message sent to service worker for background notification');
+          icon: '/mcm-logo-192.png', // Ensure icons are passed for consistency
+          badge: '/mcm-logo-192.png',
+          priority,
+          silent: false, // Explicitly pass silent
+          requireInteraction: priority === 'high',
+          vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+          tag: tag || 'mcm-test-notification', // Use provided tag or default
+          actions: [
+            { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+            { action: 'dismiss', title: 'Dismiss' }
+          ],
+          data: {
+            url: '/',
+            priority: priority,
+            timestamp: Date.now()
+          }
+        };
+
+        // If the page is visible, we can play the sound directly and let the SW only display the notification
+        // If the page is in background, the SW's vibrate option will handle the sound/vibration
+        if (document.visibilityState === 'visible') {
+            await this.playNotificationSound(priority); // Play sound immediately on client
+        }
+
+        // Post the full notification data to the service worker
+        reg.active?.postMessage(notificationData);
+        console.log('Message sent to service worker for notification display and background sound');
       } catch (error) {
         console.error('Failed to post message to service worker:', error);
-        this.showFallbackNotification(title, body, priority);
+        // If service worker communication fails for some reason (rare for an active SW),
+        // then try the true fallback if Service Workers are supported at all.
+        // On mobile, this will likely still fail with 'Illegal constructor' if the SW is active.
+        // It's generally better to fix the SW communication rather than relying on this.
+        this.showDirectBrowserNotification(title, body, priority, tag);
       }
     } else {
-      this.showFallbackNotification(title, body, priority);
+      // This path is for environments where Service Workers are not supported at all (like StackBlitz, or very old browsers)
+      this.showDirectBrowserNotification(title, body, priority, tag);
     }
 
+    // Backend logging for all notifications, regardless of display method
     try {
       const response = await fetch('/api/notifications', {
         method: 'POST',
@@ -242,8 +283,12 @@ export class PushNotificationService {
     }
   }
 
-  private showFallbackNotification(title: string, body: string, priority: 'low' | 'medium' | 'high') {
-    if ('Notification' in window && Notification.permission === 'granted') {
+  // Renamed from showFallbackNotification to clarify its purpose:
+  // This is a direct browser Notification, only used if Service Workers are not available or are truly broken.
+  // On mobile with an active SW, this *will* cause "Illegal constructor" error.
+  private showDirectBrowserNotification(title: string, body: string, priority: 'low' | 'medium' | 'high', tag?: string) {
+    // Only attempt this if ServiceWorker API itself is not available
+    if (!('serviceWorker' in navigator) && 'Notification' in window && Notification.permission === 'granted') {
       try {
         const notification = new Notification(title, {
           body,
@@ -251,7 +296,7 @@ export class PushNotificationService {
           badge: '/mcm-logo-192.png',
           silent: false,
           requireInteraction: priority === 'high',
-          tag: 'mcm-test-notification',
+          tag: tag || 'mcm-direct-notification',
           vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
           data: {
             priority: priority,
@@ -259,11 +304,14 @@ export class PushNotificationService {
           }
         });
 
+        // Auto-close for non-high priority notifications
         if (priority !== 'high') {
           setTimeout(() => {
             try {
               notification.close();
-            } catch (e) {}
+            } catch (e) {
+              console.warn('Error closing direct browser notification:', e);
+            }
           }, 5000);
         }
 
@@ -272,10 +320,12 @@ export class PushNotificationService {
           notification.close();
         };
 
-        console.log('Fallback browser notification sent successfully');
+        console.log('Direct browser notification sent successfully (Service Worker not available or failed to communicate)');
       } catch (error) {
-        console.error('Fallback browser notification failed:', error);
+        console.error('Direct browser notification failed (likely Illegal constructor on mobile with active SW):', error);
       }
+    } else {
+      console.warn('Cannot show direct browser notification: Notification API not supported, permission not granted, or Service Worker is active and should handle it.');
     }
   }
 
