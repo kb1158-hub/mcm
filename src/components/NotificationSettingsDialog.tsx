@@ -193,35 +193,43 @@ const sendNotificationToServiceWorker = async (notificationData: {
           reject(new Error(event.data.error || 'Failed to show notification via SW.'));
         }
       };
-
       navigator.serviceWorker.controller.postMessage(
         notificationData,
         [messageChannel.port2]
       );
     });
   } else {
-    console.warn("Service Worker not active or supported. Cannot send notification via SW.");
-    toast.info("Notifications might not work in the background. Please ensure Service Worker is active.");
-    
-    if ('Notification' in window && Notification.permission === 'granted') {
+    // Fallback: Try Notification API if available and allowed and not in PWA/mobile
+    if (
+      'Notification' in window &&
+      Notification.permission === 'granted' &&
+      !window.matchMedia('(display-mode: standalone)').matches && // Not PWA
+      !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) // Not mobile
+    ) {
+      try {
         new Notification(notificationData.title, {
-            body: notificationData.body,
-            icon: notificationData.icon,
-            tag: notificationData.tag,
-            requireInteraction: notificationData.requireInteraction,
-            silent: notificationData.silent,
-            vibrate: notificationData.vibrate,
-            actions: notificationData.actions,
-            data: notificationData.data
+          body: notificationData.body,
+          icon: notificationData.icon,
+          tag: notificationData.tag,
+          requireInteraction: notificationData.requireInteraction,
+          silent: notificationData.silent,
+          vibrate: notificationData.vibrate,
+          actions: notificationData.actions,
+          data: notificationData.data,
         });
-        // Resolve the promise here, as the notification is displayed directly
         return Promise.resolve({ success: true, message: "Displayed non-persistent notification." });
+      } catch (error) {
+        // Most likely an illegal constructor error
+        toast.error("Unable to display notification. Please enable notifications in your browser settings.");
+        return Promise.reject(error);
+      }
     } else {
-        return Promise.reject(new Error("Notification API not available or permission not granted."));
+      // Last resort: Toast/in-app notification
+      toast.info("Notifications may not work in the background on your device. Please ensure Service Worker is active or use a supported browser.");
+      return Promise.resolve({ success: false, message: "Used fallback notification." });
     }
   }
 };
-
 // Enhanced notification service
 export class NotificationService {
   private static addInAppNotification: ((notification: Omit<InAppNotification, 'id' | 'timestamp'>) => void) | null = null;
