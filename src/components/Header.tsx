@@ -2,16 +2,17 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Bell, User } from 'lucide-react';
-import mcmLogo from '@/assets/mcm-logo.png';
 import NotificationSettingsDialog from './NotificationSettingsDialog';
 import { useAuth } from '@/contexts/AuthContext';
 interface HeaderProps {
   onSignInClick?: () => void;
   showSignIn?: boolean;
+  unreadCount?: number;
 }
 const Header: React.FC<HeaderProps> = ({
   onSignInClick,
-  showSignIn = true
+  showSignIn = true,
+  unreadCount = 0
 }) => {
   const {
     isAuthenticated
@@ -19,13 +20,23 @@ const Header: React.FC<HeaderProps> = ({
   return <header className="w-full py-4 px-6 bg-card shadow-sm border-b border-border">
       <div className="container mx-auto flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <img src={mcmLogo} alt="MCM Alerts Logo" className="h-8 w-8" />
+          <img src="/mcm-logo-192.png" alt="MCM Alerts Logo" className="h-8 w-8 rounded" />
           <h1 className="text-2xl font-bold text-foreground">MCM Alerts</h1>
         </div>
         
         {isAuthenticated ? <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <Bell className="h-5 w-5 text-muted-foreground px-0" />
+            <div className="flex items-center space-x-2 relative">
+              <div className="relative">
+                <Bell className="h-5 w-5 text-muted-foreground" />
+                {unreadCount > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs font-bold"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Badge>
+                )}
+              </div>
               <NotificationSettingsDialog />
             </div>
             <div className="flex items-center space-x-2">
