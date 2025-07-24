@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => ({
       strategies: 'injectManifest',
       injectManifest: {
         swSrc: 'public/service-worker.js', // Your actual SW
-        swDest: 'sw.js', // Output name in dist folder
+        
       },
       workbox: {
         globPatterns: [
