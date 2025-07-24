@@ -16,26 +16,14 @@ export default defineConfig(({ mode }) => ({
     VitePWA({
       registerType: 'autoUpdate',
       strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'service-worker.js',
       injectManifest: {
-        swSrc: 'src/service-worker.js',
-        swDest: 'service-worker.js',
+        swSrc: './src/service-worker.js',
+        swDest: './service-worker.js',
+        globDirectory: './dist',
         globPatterns: [
           '**/*.{js,css,html,ico,png,svg,json,webmanifest}',
         ],
-        // Include additional files that might be needed
-        additionalManifestEntries: [
-          { url: '/', revision: null },
-          { url: '/mcm-logo-192.png', revision: null },
-          { url: '/mcm-logo-512.png', revision: null }
-        ],
-        // Exclude large files that don't need caching
-        globIgnores: [
-          '**/node_modules/**/*',
-          '**/.*',
-          '**/*.map'
-        ]
+        maximumFileSizeToCacheInBytes: 5000000, // 5MB
       },
       manifest: {
         name: 'MCM Alerts',
