@@ -491,8 +491,6 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header unreadCount={unreadCount} />
-      
       {/* Main container with proper spacing */}
       <main className="container mx-auto px-4 py-6">
         {/* Enhanced Top Panel with App Title and User Info */}
@@ -500,7 +498,10 @@ const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             {/* Left side - App Title and User Info */}
             <div className="flex flex-col">
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">MCM Alerts</h1>
+              <div className="flex items-center gap-2">
+                <img src="/mcm-logo-192.png" alt="MCM Logo" className="h-6 w-6" />
+                <h1 className="text-2xl font-bold text-foreground tracking-tight">MCM Alerts</h1>
+              </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm font-medium text-muted-foreground">MCM User</span>
                 <span className="text-xs text-muted-foreground">•</span>
