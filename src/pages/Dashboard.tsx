@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
-import { LogOut, Copy, ExternalLink, Search, Filter, Check } from 'lucide-react';
+import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
 
@@ -51,9 +51,18 @@ const Dashboard: React.FC = () => {
           // Increment unread count
           setUnreadCount(prev => prev + 1);
           
-          // Show browser notification if enabled
+          // Show browser notification if enabled and play sound
           if ('Notification' in window && Notification.permission === 'granted') {
             showBrowserNotification(payload.new as Notification);
+          } else {
+            // Even if browser notifications are disabled, play sound for API notifications
+            playNotificationSound((payload.new as Notification).priority || 'medium');
+            // Show toast notification as fallback
+            toast({
+              title: `🔔 ${(payload.new as Notification).title}`,
+              description: (payload.new as Notification).body,
+              duration: 5000,
+            });
           }
         }
       )
@@ -302,30 +311,47 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
-      const duration = priority === 'high' ? 1.0 : 0.5;
-      
+      // Different sound patterns based on priority
+      const soundConfig = {
+        low: { frequency: 400, duration: 0.3, volume: 0.1, pattern: [{ freq: 400, dur: 0.3 }] },
+        medium: { frequency: 600, duration: 0.5, volume: 0.2, pattern: [{ freq: 600, dur: 0.25 }, { freq: 600, dur: 0.25 }] },
+        high: { frequency: 800, duration: 1.0, volume: 0.3, pattern: [
+          { freq: 800, dur: 0.2 }, 
+          { freq: 1000, dur: 0.2 }, 
+          { freq: 800, dur: 0.2 }, 
+          { freq: 1000, dur: 0.2 }, 
+          { freq: 800, dur: 0.2 }
+        ]}
+      };
+
+      const config = soundConfig[priority];
       const audioContext = new AudioContext();
       
       // Resume audio context if suspended (required for mobile)
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
+
+      // Play sound pattern
+      let startTime = audioContext.currentTime;
       
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
-      oscillator.type = 'sine';
-      
-      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
-      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + duration);
+      for (const note of config.pattern) {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.setValueAtTime(note.freq, startTime);
+        oscillator.type = priority === 'high' ? 'square' : 'sine'; // Different waveform for high priority
+        
+        gainNode.gain.setValueAtTime(config.volume, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + note.dur);
+        
+        oscillator.start(startTime);
+        oscillator.stop(startTime + note.dur);
+        
+        startTime += note.dur + 0.1; // Small gap between notes
+      }
 
       // Clean up
       setTimeout(() => {
@@ -334,7 +360,7 @@ const Dashboard: React.FC = () => {
         } catch (e) {
           console.warn('Could not close audio context:', e);
         }
-      }, (duration + 0.1) * 1000);
+      }, (config.duration + 1) * 1000);
 
     } catch (error) {
       console.warn('Could not play notification sound:', error);
@@ -467,24 +493,54 @@ const Dashboard: React.FC = () => {
     <div className="min-h-screen bg-background">
       <Header unreadCount={unreadCount} />
       
-      {/* Fixed main container with proper spacing */}
-      <main className="container mx-auto px-4 py-8">
-        {/* Fixed header section with proper spacing and alignment */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage your notifications and monitor system status
-            </p>
+      {/* Main container with proper spacing */}
+      <main className="container mx-auto px-4 py-6">
+        {/* Header with Settings, Notifications, and Logout */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            {/* Settings Icon */}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex items-center gap-2"
+              onClick={() => navigate('/settings')}
+            >
+              <Settings className="h-4 w-4" />
+              <span>Settings</span>
+            </Button>
           </div>
-          <Button 
-            onClick={handleLogout} 
-            variant="outline" 
-            className="flex items-center gap-2 hover:bg-destructive hover:text-destructive-foreground transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Logout</span>
-          </Button>
+          
+          <div className="flex items-center gap-3">
+            {/* Notifications Bell with Unread Count */}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="relative flex items-center gap-2"
+              onClick={() => { navigate('/notifications'); markAsRead(); }}
+            >
+              <Bell className="h-4 w-4" />
+              <span>Notifications</span>
+              {unreadCount > 0 && (
+                <Badge 
+                  variant="destructive" 
+                  className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs font-bold"
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </Badge>
+              )}
+            </Button>
+            
+            {/* Logout Button */}
+            <Button 
+              onClick={handleLogout} 
+              variant="outline" 
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Logout</span>
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -621,7 +677,7 @@ const Dashboard: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="max-h-96 overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                     {filteredNotifications.map((n) => (
                       <div 
                         key={n.id} 
@@ -679,10 +735,10 @@ const Dashboard: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Test Notification */}
+            {/* Notification Controls */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-center">🔔 Test Notifications</CardTitle>
+                <CardTitle className="text-center">🔔 Notification Controls</CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
                 <Button 
@@ -690,7 +746,7 @@ const Dashboard: React.FC = () => {
                   className="w-full mb-4 bg-primary hover:bg-primary/90"
                   disabled={isLoading}
                 >
-                  {isLoading ? "Sending..." : "Test Notification"}
+                  {isLoading ? "Sending..." : "Send Test Alert"}
                 </Button>
                 <div className="grid grid-cols-3 gap-2">
                   <Button 
@@ -700,7 +756,7 @@ const Dashboard: React.FC = () => {
                     className="text-xs"
                     disabled={isLoading}
                   >
-                    Low
+                    Low Priority
                   </Button>
                   <Button 
                     variant="outline" 
@@ -709,7 +765,7 @@ const Dashboard: React.FC = () => {
                     className="text-xs"
                     disabled={isLoading}
                   >
-                    Medium
+                    Medium Priority
                   </Button>
                   <Button 
                     variant="destructive" 
@@ -718,12 +774,12 @@ const Dashboard: React.FC = () => {
                     className="text-xs"
                     disabled={isLoading}
                   >
-                    High
+                    High Priority
                   </Button>
                 </div>
                 {!notificationsEnabled && (
                   <p className="text-xs text-muted-foreground mt-2 text-center">
-                    Click test to enable notifications
+                    Click test to enable browser notifications
                   </p>
                 )}
               </CardContent>
