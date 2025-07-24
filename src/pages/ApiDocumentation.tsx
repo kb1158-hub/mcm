@@ -7,6 +7,7 @@ import { Copy, ArrowLeft, Code, Book, Zap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { Link } from 'react-router-dom';
+import { Label } from '@/components/ui/label';
 
 const ApiDocumentation: React.FC = () => {
   const { toast } = useToast();
@@ -340,11 +341,5 @@ const ApiDocumentation: React.FC = () => {
     </div>
   );
 };
-
-const Label: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-    {children}
-  </label>
-);
 
 export default ApiDocumentation;
