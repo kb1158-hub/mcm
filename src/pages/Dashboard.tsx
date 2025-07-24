@@ -78,6 +78,39 @@ const Dashboard: React.FC = () => {
     setUnreadCount(0);
   };
 
+  // Helper function for direct notifications (when no service worker or as fallback)
+  const showDirectNotification = async (notification: Notification) => {
+    const browserNotification = new Notification(notification.title, {
+      body: notification.body,
+      icon: '/mcm-logo-192.png',
+      badge: '/mcm-logo-192.png',
+      tag: 'mcm-realtime',
+      requireInteraction: notification.priority === 'high',
+      silent: false,
+      vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+      data: {
+        priority: notification.priority,
+        timestamp: Date.now()
+      }
+    });
+
+    // Handle notification click
+    browserNotification.onclick = () => {
+      window.focus();
+      browserNotification.close();
+    };
+
+    // Auto-close after delay
+    setTimeout(() => {
+      try {
+        browserNotification.close();
+      } catch (e) {
+        // Notification might already be closed
+        console.warn('Could not close notification:', e);
+      }
+    }, notification.priority === 'high' ? 10000 : 5000);
+  };
+
   const showBrowserNotification = async (notification: Notification) => {
     try {
       // Check if notifications are supported
@@ -95,38 +128,49 @@ const Dashboard: React.FC = () => {
       // Play sound first
       await playNotificationSound(notification.priority || 'medium');
       
-      // Show browser notification
-      const browserNotification = new Notification(notification.title, {
-        body: notification.body,
-        icon: '/mcm-logo-192.png',
-        badge: '/mcm-logo-192.png',
-        tag: 'mcm-realtime',
-        requireInteraction: notification.priority === 'high',
-        silent: false,
-        vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
-        data: {
-          priority: notification.priority,
-          timestamp: Date.now()
-        }
-      });
-
-      // Handle notification click
-      browserNotification.onclick = () => {
-        window.focus();
-        browserNotification.close();
-      };
-
-      // Auto-close after delay
-      setTimeout(() => {
+      // Check if service worker is available and use it preferentially
+      if ('serviceWorker' in navigator) {
         try {
-          browserNotification.close();
-        } catch (e) {
-          // Notification might already be closed
-          console.warn('Could not close notification:', e);
-        }
-      }, notification.priority === 'high' ? 10000 : 5000);
+          const registration = await navigator.serviceWorker.ready;
+          
+          // Use service worker notification
+          await registration.showNotification(notification.title, {
+            body: notification.body,
+            icon: '/mcm-logo-192.png',
+            badge: '/mcm-logo-192.png',
+            tag: 'mcm-realtime',
+            requireInteraction: notification.priority === 'high',
+            silent: false,
+            vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
+            data: {
+              priority: notification.priority,
+              timestamp: Date.now(),
+              url: window.location.origin
+            },
+            // Additional service worker notification options
+            actions: notification.priority === 'high' ? [
+              {
+                action: 'acknowledge',
+                title: 'Acknowledge',
+                icon: '/mcm-logo-192.png'
+              }
+            ] : []
+          });
 
-      // Show toast notification
+          // For service worker notifications, click handling is done in the service worker
+          
+        } catch (swError) {
+          console.warn('Service worker notification failed, falling back to direct notification:', swError);
+          
+          // Fallback to direct notification if service worker fails
+          await showDirectNotification(notification);
+        }
+      } else {
+        // No service worker, use direct notification
+        await showDirectNotification(notification);
+      }
+
+      // Show toast notification regardless
       toast({
         title: `🔔 ${notification.title}`,
         description: notification.body,
@@ -228,28 +272,90 @@ const Dashboard: React.FC = () => {
       // Update notifications enabled state
       setNotificationsEnabled(true);
 
-      // Send simple browser notification
+      // Prepare notification data
       const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
       const body = `Test notification (${priority} priority) - ${new Date().toLocaleTimeString()}`;
       
-      // Create browser notification
-      const notification = new Notification(title, {
-        body,
-        icon: '/mcm-logo-192.png',
-        badge: '/mcm-logo-192.png',
-        tag: 'mcm-test',
-        requireInteraction: priority === 'high',
-        silent: false
-      });
-
-      // Handle notification click
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
-
-      // Play sound
+      // Play sound first
       await playNotificationSound(priority);
+
+      // Show notification using service worker if available
+      if ('serviceWorker' in navigator) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          
+          await registration.showNotification(title, {
+            body,
+            icon: '/mcm-logo-192.png',
+            badge: '/mcm-logo-192.png',
+            tag: 'mcm-test',
+            requireInteraction: priority === 'high',
+            silent: false,
+            data: {
+              priority,
+              timestamp: Date.now(),
+              url: window.location.origin // To focus the app when clicked
+            },
+            actions: priority === 'high' ? [
+              {
+                action: 'acknowledge',
+                title: 'Acknowledge'
+              }
+            ] : []
+          });
+          
+        } catch (swError) {
+          console.warn('Service worker notification failed, falling back to direct notification:', swError);
+          
+          // Fallback to direct notification
+          const notification = new Notification(title, {
+            body,
+            icon: '/mcm-logo-192.png',
+            badge: '/mcm-logo-192.png',
+            tag: 'mcm-test',
+            requireInteraction: priority === 'high',
+            silent: false
+          });
+
+          // Handle notification click
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+
+          // Auto-close notification after delay
+          setTimeout(() => {
+            try {
+              notification.close();
+            } catch (e) {
+              console.warn('Could not close test notification:', e);
+            }
+          }, priority === 'high' ? 10000 : 5000);
+        }
+      } else {
+        // No service worker, use direct notification
+        const notification = new Notification(title, {
+          body,
+          icon: '/mcm-logo-192.png',
+          badge: '/mcm-logo-192.png',
+          tag: 'mcm-test',
+          requireInteraction: priority === 'high',
+          silent: false
+        });
+
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+
+        setTimeout(() => {
+          try {
+            notification.close();
+          } catch (e) {
+            console.warn('Could not close test notification:', e);
+          }
+        }, priority === 'high' ? 10000 : 5000);
+      }
 
       // Store in database - with error handling
       try {
@@ -271,16 +377,6 @@ const Dashboard: React.FC = () => {
         console.warn('API call failed:', apiError);
         // Continue - notification was still shown to user
       }
-
-      // Auto-close notification after delay
-      setTimeout(() => {
-        try {
-          notification.close();
-        } catch (e) {
-          // Notification might already be closed
-          console.warn('Could not close test notification:', e);
-        }
-      }, priority === 'high' ? 10000 : 5000);
 
       toast({
         title: "✅ Notification Sent!",
