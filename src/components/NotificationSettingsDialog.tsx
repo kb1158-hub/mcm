@@ -9,9 +9,10 @@ import {
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Settings, Bell, Volume2, X, AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { Settings, Bell, Volume2, X, AlertCircle, CheckCircle, Info, Smartphone } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { Badge } from '@/components/ui/badge';
+import { pushService } from '@/services/pushNotificationService';
 
 // In-app notification types
 type NotificationType = 'info' | 'success' | 'warning' | 'error';
@@ -46,7 +47,15 @@ const NotificationContext = createContext<{
 // In-app notification provider
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [inAppEnabled, setInAppEnabled] = useState(true);
+  const [inAppEnabled, setInAppEnabled] = useState(() => {
+    const saved = localStorage.getItem('mcm-inapp-notifications');
+    return saved ? JSON.parse(saved) : true;
+  });
+
+  // Save in-app preference
+  useEffect(() => {
+    localStorage.setItem('mcm-inapp-notifications', JSON.stringify(inAppEnabled));
+  }, [inAppEnabled]);
 
   const addNotification = (notification: Omit<InAppNotification, 'id' | 'timestamp'>) => {
     if (!inAppEnabled) return;
@@ -57,7 +66,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       timestamp: new Date()
     };
 
-    setNotifications(prev => [newNotification, ...prev]);
+    setNotifications(prev => [newNotification, ...prev.slice(0, 4)]); // Keep max 5 notifications
 
     // Auto-remove if specified
     if (notification.autoClose && !notification.persistent) {
@@ -114,22 +123,26 @@ const NotificationItem: React.FC<{ notification: InAppNotification }> = ({ notif
 
   const getBgColor = () => {
     switch (notification.type) {
-      case 'success': return 'bg-green-50 border-green-200';
-      case 'error': return 'bg-red-50 border-red-200';
-      case 'warning': return 'bg-yellow-50 border-yellow-200';
-      default: return 'bg-blue-50 border-blue-200';
+      case 'success': return 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800';
+      case 'error': return 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800';
+      case 'warning': return 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800';
+      default: return 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800';
     }
   };
 
   return (
-    <div className={`p-4 rounded-lg border ${getBgColor()} shadow-sm animate-in slide-in-from-right-full`}>
+    <div className={`p-4 rounded-lg border ${getBgColor()} shadow-lg backdrop-blur-sm animate-in slide-in-from-right-full duration-300`}>
       <div className="flex items-start justify-between">
-        <div className="flex items-start space-x-3">
+        <div className="flex items-start space-x-3 flex-1">
           {getIcon()}
-          <div className="flex-1">
-            <h4 className="font-medium text-gray-900">{notification.title}</h4>
-            <p className="text-sm text-gray-700 mt-1">{notification.message}</p>
-            <p className="text-xs text-gray-500 mt-2">
+          <div className="flex-1 min-w-0">
+            <h4 className="font-medium text-gray-900 dark:text-gray-100 text-sm leading-tight">
+              {notification.title}
+            </h4>
+            <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 break-words">
+              {notification.message}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
               {notification.timestamp.toLocaleTimeString()}
             </p>
           </div>
@@ -138,7 +151,7 @@ const NotificationItem: React.FC<{ notification: InAppNotification }> = ({ notif
           variant="ghost"
           size="sm"
           onClick={() => removeNotification(notification.id)}
-          className="h-6 w-6 p-0"
+          className="h-6 w-6 p-0 shrink-0 ml-2"
         >
           <X className="h-4 w-4" />
         </Button>
@@ -154,7 +167,7 @@ const InAppNotificationContainer: React.FC = () => {
   if (notifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-3 max-w-md">
+    <div className="fixed top-4 right-4 z-50 space-y-3 max-w-sm w-full max-h-screen overflow-y-auto">
       {notifications.length > 3 && (
         <div className="text-center">
           <Button variant="outline" size="sm" onClick={clearAll}>
@@ -169,69 +182,6 @@ const InAppNotificationContainer: React.FC = () => {
   );
 };
 
-// Helper function to send messages to the Service Worker (your existing function)
-const sendNotificationToServiceWorker = async (notificationData: {
-  type: string;
-  title: string;
-  body: string;
-  icon?: string;
-  badge?: string;
-  tag?: string;
-  requireInteraction?: boolean;
-  silent?: boolean;
-  vibrate?: number[];
-  actions?: { action: string; title: string; icon?: string }[];
-  data?: any;
-}) => {
-  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-    return new Promise((resolve, reject) => {
-      const messageChannel = new MessageChannel();
-      messageChannel.port1.onmessage = (event) => {
-        if (event.data.success) {
-          resolve(event.data);
-        } else {
-          reject(new Error(event.data.error || 'Failed to show notification via SW.'));
-        }
-      };
-      navigator.serviceWorker.controller.postMessage(
-        notificationData,
-        [messageChannel.port2]
-      );
-    });
-  } else {
-    // Only use Notification API on desktop, NOT mobile/PWA/standalone
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    if (
-      'Notification' in window &&
-      Notification.permission === 'granted' &&
-      !isMobile &&
-      !isStandalone
-    ) {
-      try {
-        new Notification(notificationData.title, {
-          body: notificationData.body,
-          icon: notificationData.icon,
-          tag: notificationData.tag,
-          requireInteraction: notificationData.requireInteraction,
-          silent: notificationData.silent,
-          vibrate: notificationData.vibrate,
-          actions: notificationData.actions,
-          data: notificationData.data,
-        });
-        return Promise.resolve({ success: true, message: "Displayed non-persistent notification." });
-      } catch (error) {
-        // Fallback if Notification throws
-        toast.error("Unable to display notification. Please enable notifications in your browser settings.");
-        return Promise.reject(error);
-      }
-    } else {
-      // In-app fallback for unsupported cases
-      toast.info("Notifications may not work in the background on your device. Please ensure Service Worker is active or use a supported browser.");
-      return Promise.resolve({ success: false, message: "Used fallback notification." });
-    }
-  }
-};
 // Enhanced notification service
 export class NotificationService {
   private static addInAppNotification: ((notification: Omit<InAppNotification, 'id' | 'timestamp'>) => void) | null = null;
@@ -245,19 +195,13 @@ export class NotificationService {
     title: string;
     message: string;
     type?: NotificationType;
-    browserOptions?: {
-      icon?: string;
-      tag?: string;
-      requireInteraction?: boolean;
-      silent?: boolean;
-      data?: any;
-    };
+    priority?: 'low' | 'medium' | 'high';
     inAppOptions?: {
       persistent?: boolean;
       autoClose?: number;
     };
   }) {
-    const { title, message, type = 'info', browserOptions = {}, inAppOptions = {} } = options;
+    const { title, message, type = 'info', priority = 'medium', inAppOptions = {} } = options;
 
     // Always show in-app notification first
     if (this.addInAppNotification) {
@@ -269,140 +213,183 @@ export class NotificationService {
       });
     }
 
-    // Try browser notification if permission granted
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        await sendNotificationToServiceWorker({
-          type: 'SHOW_NOTIFICATION',
-          title,
-          body: message,
-          icon: '/mcm-logo-192.png',
-          ...browserOptions
-        });
-      } catch (error) {
-        console.warn('Browser notification failed, but in-app notification was shown:', error);
-      }
+    // Try browser notification
+    try {
+      await pushService.sendNotification(title, message, priority);
+    } catch (error) {
+      console.warn('Browser notification failed, but in-app notification was shown:', error);
     }
   }
 }
 
-// Your enhanced notification settings dialog
+// Main notification settings dialog
 const NotificationSettingsDialog: React.FC = () => {
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('mcm-sound-enabled');
+    return saved ? JSON.parse(saved) : true;
+  });
+  
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   const { addNotification, inAppEnabled, setInAppEnabled } = useNotifications();
+
+  // Save sound preference
+  useEffect(() => {
+    localStorage.setItem('mcm-sound-enabled', JSON.stringify(soundEnabled));
+  }, [soundEnabled]);
 
   // Set up notification service
   useEffect(() => {
     NotificationService.setInAppNotifier(addNotification);
   }, [addNotification]);
 
+  // Check initial states
   useEffect(() => {
-    if ('Notification' in window) {
-      setPermission(Notification.permission);
-      setNotificationsEnabled(Notification.permission === 'granted');
+    const checkNotificationState = async () => {
+      if ('Notification' in window) {
+        const currentPermission = Notification.permission;
+        setPermission(currentPermission);
+        setNotificationsEnabled(currentPermission === 'granted');
+
+        // Check push subscription status
+        try {
+          if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
+            setPushSubscribed(!!subscription);
+          }
+        } catch (error) {
+          console.error('Error checking push subscription:', error);
+        }
+      }
+    };
+
+    if (isDialogOpen) {
+      checkNotificationState();
     }
   }, [isDialogOpen]);
 
   const handleNotificationToggle = async (enabled: boolean) => {
-    if (enabled) {
-      try {
-        const permission = await Notification.requestPermission();
-        setPermission(permission);
-        setNotificationsEnabled(permission === 'granted');
+    if (!enabled) {
+      setNotificationsEnabled(false);
+      setPushSubscribed(false);
+      await pushService.unsubscribe();
+      toast.success('Notifications have been disabled');
+      return;
+    }
 
-        if (permission === 'granted') {
-          toast.success('✅ Notifications enabled successfully!');
+    setIsLoading(true);
+    
+    try {
+      // Request basic notification permission
+      const hasPermission = await pushService.requestPermission();
+      
+      if (hasPermission) {
+        setPermission('granted');
+        setNotificationsEnabled(true);
+
+        // Try to set up push subscription
+        try {
+          const subscription = await pushService.subscribe();
+          setPushSubscribed(!!subscription);
           
-          // Send dual notification (both browser and in-app)
+          if (subscription) {
+            toast.success('✅ Push notifications enabled successfully!');
+          } else {
+            toast.success('✅ Basic notifications enabled successfully!');
+          }
+
+          // Send welcome notification
           NotificationService.sendDualNotification({
             title: 'MCM Alerts',
-            message: 'Great! You will now receive notifications from MCM Alerts �',
+            message: 'Great! You will now receive notifications from MCM Alerts 🔔',
             type: 'success',
-            browserOptions: {
-              tag: 'welcome',
-              data: { url: '/' }
-            },
+            priority: 'medium',
             inAppOptions: {
               autoClose: 5000
             }
           });
-        } else {
-          toast.error('❌ Please click "Allow" in the browser dialog to enable notifications');
+          
+        } catch (pushError) {
+          console.error('Push subscription failed:', pushError);
+          toast.success('✅ Basic notifications enabled (push notifications unavailable)');
+          
+          NotificationService.sendDualNotification({
+            title: 'MCM Alerts',
+            message: 'Basic notifications enabled. For background notifications, please ensure your browser supports push notifications.',
+            type: 'info',
+            priority: 'medium',
+            inAppOptions: {
+              autoClose: 7000
+            }
+          });
         }
-      } catch (error) {
-        console.error('Error requesting notification permission:', error);
-        toast.error('Failed to request notification permission. Please try again.');
+      } else {
+        toast.error('❌ Please click "Allow" in the browser dialog to enable notifications');
       }
-    } else {
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+      toast.error('Failed to request notification permission. Please try again.');
       setNotificationsEnabled(false);
-      toast.success('Notifications have been disabled');
+      setPushSubscribed(false);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const sendTestNotification = async () => {
-    // Always show in-app test notification
-    addNotification({
-      title: '🔔 Test Notification',
-      message: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
-      type: 'success',
-      autoClose: 5000
-    });
+    setIsLoading(true);
+    
+    try {
+      // Always show in-app test notification
+      addNotification({
+        title: '🔔 Test Notification',
+        message: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
+        type: 'success',
+        autoClose: 5000
+      });
 
-    // Also try browser notification if enabled
-    if (Notification.permission === 'granted') {
-      try {
-        await sendNotificationToServiceWorker({
-          type: 'SHOW_NOTIFICATION',
-          title: '🔔 Test Notification',
-          body: 'This is a test notification from MCM Alerts! Everything is working perfectly. 🚀',
-          icon: '/mcm-logo-192.png',
-          tag: 'test',
-          requireInteraction: false,
-          data: { url: '/dashboard', priority: 'medium' }
-        });
-      } catch (error) {
-        console.error('Failed to send browser notification:', error);
+      // Try browser/push notification
+      if (Notification.permission === 'granted') {
+        try {
+          await pushService.sendTestNotification('medium');
+        } catch (error) {
+          console.error('Failed to send test notification:', error);
+        }
       }
+
+      toast.success('✅ Test notification sent successfully!');
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      toast.error('Failed to send test notification');
+    } finally {
+      setIsLoading(false);
     }
-
-    // Sound playback
-    if (soundEnabled) {
-      try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
-        oscillator.type = 'sine';
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.3);
-      } catch {
-        // Fail silently if AudioContext is unavailable
-      }
-    }
-
-    toast.success('✅ Test notification sent successfully!');
   };
 
   const getStatusBadge = () => {
+    if (isLoading) {
+      return <Badge variant="outline">⏳ Loading...</Badge>;
+    }
+    
     switch (permission) {
       case 'granted':
-        return <Badge className="bg-green-100 text-green-800">✅ Enabled</Badge>;
+        return pushSubscribed ? 
+          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100">✅ Push Enabled</Badge> :
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100">✅ Basic Enabled</Badge>;
       case 'denied':
         return <Badge variant="destructive">❌ Blocked</Badge>;
       default:
         return <Badge variant="outline">⏳ Not Set</Badge>;
     }
   };
+
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
 
   return (
     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -420,15 +407,23 @@ const NotificationSettingsDialog: React.FC = () => {
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+          {/* Status Overview */}
+          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
             <div>
-              <p className="font-medium">Browser Notifications</p>
-              <p className="text-sm text-gray-600">
-                Status: {getStatusBadge()}
+              <p className="font-medium">Notification Status</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {getStatusBadge()}
               </p>
+              {isMobile && (
+                <div className="flex items-center gap-1 mt-1">
+                  <Smartphone className="h-3 w-3 text-blue-600" />
+                  <span className="text-xs text-blue-600">Mobile Device</span>
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Browser Notifications */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Bell className="h-5 w-5 text-blue-600" />
@@ -436,8 +431,8 @@ const NotificationSettingsDialog: React.FC = () => {
                 <Label htmlFor="notifications" className="font-medium">
                   Browser Notifications
                 </Label>
-                <p className="text-sm text-gray-600">
-                  Get notified about important alerts
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {isMobile ? 'Get background push notifications' : 'Get desktop notifications'}
                 </p>
               </div>
             </div>
@@ -445,11 +440,13 @@ const NotificationSettingsDialog: React.FC = () => {
               id="notifications"
               checked={notificationsEnabled}
               onCheckedChange={handleNotificationToggle}
+              disabled={isLoading}
               aria-checked={notificationsEnabled}
               role="switch"
             />
           </div>
 
+          {/* In-App Notifications */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Bell className="h-5 w-5 text-purple-600" />
@@ -457,7 +454,9 @@ const NotificationSettingsDialog: React.FC = () => {
                 <Label htmlFor="inapp" className="font-medium">
                   In-App Notifications
                 </Label>
-                <p className="text-sm text-gray-600">Show notifications while using the app</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Show notifications while using the app
+                </p>
               </div>
             </div>
             <Switch
@@ -469,6 +468,7 @@ const NotificationSettingsDialog: React.FC = () => {
             />
           </div>
 
+          {/* Sound Notifications */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Volume2 className="h-5 w-5 text-green-600" />
@@ -476,7 +476,9 @@ const NotificationSettingsDialog: React.FC = () => {
                 <Label htmlFor="sound" className="font-medium">
                   Notification Sounds
                 </Label>
-                <p className="text-sm text-gray-600">Play sound with notifications</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Play sound with notifications
+                </p>
               </div>
             </div>
             <Switch
@@ -488,22 +490,47 @@ const NotificationSettingsDialog: React.FC = () => {
             />
           </div>
 
-          <div className="pt-4 border-t">
+          {/* Test Button */}
+          <div className="pt-4 border-t dark:border-gray-700">
             <Button
               onClick={sendTestNotification}
               className="w-full"
               variant="outline"
+              disabled={isLoading}
               aria-label="Send Test Notification"
             >
-              🔔 Send Test Notification
+              {isLoading ? (
+                <>⏳ Sending...</>
+              ) : (
+                <>🔔 Send Test Notification</>
+              )}
             </Button>
           </div>
 
+          {/* Help Messages */}
           {permission === 'denied' && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg" role="alert">
-              <p className="text-sm text-red-800">
-                <strong>Notifications Blocked:</strong> Click the lock icon in your browser's
-                address bar and allow notifications, then refresh the page.
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg" role="alert">
+              <p className="text-sm text-red-800 dark:text-red-200">
+                <strong>Notifications Blocked:</strong> {isMobile ? 
+                  'Go to your browser settings and allow notifications for this site, then refresh the page.' :
+                  'Click the lock icon in your browser\'s address bar and allow notifications, then refresh the page.'
+                }
+              </p>
+            </div>
+          )}
+
+          {isMobile && isStandalone && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>PWA Mode:</strong> Background notifications work best in PWA mode. Make sure to allow notifications when prompted.
+              </p>
+            </div>
+          )}
+
+          {notificationsEnabled && !pushSubscribed && (
+            <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                <strong>Limited Mode:</strong> Basic notifications are enabled. Push notifications are not available in your current environment.
               </p>
             </div>
           )}
@@ -513,17 +540,18 @@ const NotificationSettingsDialog: React.FC = () => {
   );
 };
 
-// Demo showing the complete system
-const App: React.FC = () => {
+// Demo component for testing
+const NotificationDemo: React.FC = () => {
   const { addNotification } = useNotifications();
 
   const sendDemoNotifications = () => {
-    // Show different types of notifications
+    // Show different types of notifications with delay
     setTimeout(() => {
       NotificationService.sendDualNotification({
         title: 'Price Alert',
         message: 'Your watched item dropped 15% in price!',
         type: 'success',
+        priority: 'high',
         inAppOptions: { autoClose: 6000 }
       });
     }, 500);
@@ -549,12 +577,15 @@ const App: React.FC = () => {
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
-      <div className="flex items-center justify-end mb-6"> {/* Changed justify-between to justify-end */}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">MCM Alerts Dashboard</h1>
         <NotificationSettingsDialog />
       </div>
       
       <div className="space-y-4">
-        {/* Removed the descriptive paragraph */}
+        <p className="text-gray-600 dark:text-gray-400">
+          Configure your notification preferences and test the notification system.
+        </p>
         
         <Button onClick={sendDemoNotifications} className="w-full">
           Send Demo Notifications
@@ -568,9 +599,10 @@ const App: React.FC = () => {
 const NotificationApp: React.FC = () => {
   return (
     <NotificationProvider>
-      <App />
+      <NotificationDemo />
     </NotificationProvider>
   );
 };
 
 export default NotificationApp;
+export { NotificationSettingsDialog, NotificationProvider, useNotifications, NotificationService };
