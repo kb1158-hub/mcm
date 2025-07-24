@@ -1,4 +1,5 @@
-// src/services/pushNotificationService.ts - Enhanced version
+// src/services/pushNotificationService.ts - Updated with your VAPID key
+
 export class PushNotificationService {
   private registration: ServiceWorkerRegistration | null = null;
   private isStackBlitz = false;
@@ -84,13 +85,11 @@ export class PushNotificationService {
         
       case 'NOTIFICATION_CLICKED':
         console.log('Notification clicked from service worker:', data);
-        // Handle notification click
         this.handleNotificationClick(data);
         break;
         
       case 'PUSH_NOTIFICATION_RECEIVED':
         console.log('Push notification received:', data);
-        // Handle push notification
         this.handlePushNotification(data);
         break;
         
@@ -100,17 +99,14 @@ export class PushNotificationService {
   }
 
   private handleNotificationClick(data: any) {
-    // Dispatch custom event for notification click
     window.dispatchEvent(new CustomEvent('notificationClick', { detail: data }));
     
-    // Mark as acknowledged if needed
     if (data.id) {
       this.acknowledgeNotification(data.id);
     }
   }
 
   private handlePushNotification(data: any) {
-    // Dispatch custom event for new push notification
     window.dispatchEvent(new CustomEvent('pushNotificationReceived', { detail: data }));
   }
 
@@ -164,7 +160,6 @@ export class PushNotificationService {
     } catch (error) {
       console.error('Failed to play notification sound:', error);
       
-      // Fallback vibration for mobile
       if (navigator.vibrate) {
         const pattern = priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200];
         navigator.vibrate(pattern);
@@ -217,15 +212,16 @@ export class PushNotificationService {
           return existingSubscription;
         }
 
-        // Create new subscription
+        // Create new subscription with YOUR VAPID public key
         const subscription = await this.registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: this.urlB64ToUint8Array(
-            'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAKeFXjWWqlaGSb0TSa1TCEdqNB0NDrWJZnIa5oZUMoMJpE'
+            // Use environment variable or fallback to your key
+            import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BCk21-ioklyur883nJg0PbBZxhkOvVzvmUzASZHLwHTW6qQjnkNdjo0GU23LycsD9Om27Ihx8qXfDEGqFqaePDc'
           )
         });
         
-        console.log('New push subscription created:', subscription);
+        console.log('New push subscription created with your VAPID key:', subscription);
         await this.sendSubscriptionToBackend(subscription);
         
         // Notify callbacks
@@ -304,6 +300,29 @@ export class PushNotificationService {
     return outputArray;
   }
 
+  async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
+    const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
+    const body = `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
+
+    const hasPermission = await this.requestPermission();
+    if (!hasPermission) {
+      throw new Error('Notification permission not granted');
+    }
+
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    try {
+      await this.sendNotificationViaServiceWorker(title, body, priority);
+      await this.playNotificationSound(priority);
+      await this.storeNotificationInBackend(title, body, priority);
+    } catch (error) {
+      console.error('Test notification failed:', error);
+      throw error;
+    }
+  }
+
   async sendNotificationViaServiceWorker(
     title: string, 
     body: string, 
@@ -355,7 +374,6 @@ export class PushNotificationService {
           }
         }, [messageChannel.port2]);
 
-        // Timeout after 5 seconds
         setTimeout(() => {
           reject(new Error('Service Worker notification timeout'));
         }, 5000);
@@ -378,39 +396,8 @@ export class PushNotificationService {
     }
   }
 
-  async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
-    const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
-    const body = `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
-
-    const hasPermission = await this.requestPermission();
-    if (!hasPermission) {
-      throw new Error('Notification permission not granted');
-    }
-
-    // Initialize audio context if suspended
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
-    }
-
-    try {
-      // Always use service worker for notifications
-      await this.sendNotificationViaServiceWorker(title, body, priority);
-      
-      // Play sound
-      await this.playNotificationSound(priority);
-      
-      // Store in backend
-      await this.storeNotificationInBackend(title, body, priority);
-      
-    } catch (error) {
-      console.error('Test notification failed:', error);
-      throw error;
-    }
-  }
-
   private async storeNotificationInBackend(title: string, body: string, priority: string) {
     try {
-      // Try netlify function first
       let response = await fetch('/.netlify/functions/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,7 +410,6 @@ export class PushNotificationService {
         })
       });
 
-      // Fallback to backend server
       if (!response.ok) {
         response = await fetch('/api/notifications', {
           method: 'POST',
@@ -446,7 +432,6 @@ export class PushNotificationService {
       console.log('Notification stored in backend:', result);
     } catch (error) {
       console.error('Failed to store notification in backend:', error);
-      // Don't throw here - notification can still work without backend storage
     }
   }
 
@@ -466,7 +451,6 @@ export class PushNotificationService {
           await subscription.unsubscribe();
           console.log('Push subscription cancelled.');
           
-          // Notify callbacks
           this.subscriptionCallbacks.forEach(callback => callback(null));
           
           return true;
@@ -478,7 +462,6 @@ export class PushNotificationService {
     return false;
   }
 
-  // Get current subscription status
   async getSubscription(): Promise<PushSubscription | null> {
     if (!this.registration) {
       await this.initialize();
@@ -490,13 +473,11 @@ export class PushNotificationService {
     return null;
   }
 
-  // Add subscription change listener
   onSubscriptionChange(callback: (subscription: PushSubscription | null) => void) {
     this.subscriptionCallbacks.add(callback);
     return () => this.subscriptionCallbacks.delete(callback);
   }
 
-  // Clear all notifications
   async clearAllNotifications(): Promise<void> {
     if (!this.registration) return;
 
@@ -513,12 +494,10 @@ export class PushNotificationService {
     }
   }
 
-  // Check if notifications are supported
   static isSupported(): boolean {
     return 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
   }
 
-  // Get notification permission status
   static getPermissionStatus(): NotificationPermission {
     return 'Notification' in window ? Notification.permission : 'denied';
   }
