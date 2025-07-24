@@ -1,330 +1,351 @@
-// src/components/InAppNotificationSystem.tsx - Real-time in-app notifications
+// Create/Update this file: src/components/InAppNotificationSystem.tsx
+
 import React, { useEffect, useState } from 'react';
-import { X, Bell, AlertCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
+import { X, Bell, Wifi, WifiOff, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { toast } from '@/components/ui/sonner';
+import { realTimeNotificationService, RealTimeNotification } from '@/services/realTimeNotificationService';
+import { pushService } from '@/services/pushNotificationService';
 
-interface InAppNotification {
-  id: string;
-  title: string;
-  body: string;
-  type: 'info' | 'success' | 'warning' | 'error';
-  priority: 'low' | 'medium' | 'high';
-  timestamp: Date;
-  persistent?: boolean;
-  autoClose?: number;
-  acknowledged?: boolean;
+interface DisplayNotification extends RealTimeNotification {
+  isVisible: boolean;
+  dismissedAt?: number;
 }
 
 const InAppNotificationSystem: React.FC = () => {
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [isVisible, setIsVisible] = useState(true);
+  const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionType, setConnectionType] = useState<string>('disconnected');
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
 
   useEffect(() => {
-    // Listen for new notifications from various sources
-    const handleNewNotification = (event: CustomEvent) => {
-      const notificationData = event.detail;
-      addNotification({
-        id: notificationData.id || generateId(),
-        title: notificationData.title,
-        body: notificationData.body || notificationData.message,
-        type: mapPriorityToType(notificationData.priority),
-        priority: notificationData.priority || 'medium',
-        timestamp: new Date(notificationData.created_at || Date.now()),
-        persistent: notificationData.priority === 'high',
-        autoClose: getAutoCloseDelay(notificationData.priority)
-      });
-    };
+    // Initialize audio context
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      setAudioContext(ctx);
+    } catch (error) {
+      console.warn('Audio context not supported:', error);
+    }
 
-    const handlePushNotification = (event: CustomEvent) => {
-      const notificationData = event.detail;
-      addNotification({
-        id: notificationData.id || generateId(),
-        title: notificationData.title,
-        body: notificationData.body,
-        type: mapPriorityToType(notificationData.priority),
-        priority: notificationData.priority || 'medium',
-        timestamp: new Date(),
-        persistent: notificationData.priority === 'high',
-        autoClose: getAutoCloseDelay(notificationData.priority)
-      });
-    };
+    // Initialize real-time notification service
+    const initializeServices = async () => {
+      try {
+        // Initialize push notification service
+        await pushService.initialize();
+        console.log('Push service initialized');
 
-    const handleNotificationClick = (event: CustomEvent) => {
-      const notificationData = event.detail;
-      // Mark notification as acknowledged when clicked from browser notification
-      if (notificationData.id) {
-        markAsAcknowledged(notificationData.id);
+        // Initialize real-time notification service
+        await realTimeNotificationService.initialize();
+        console.log('Real-time notification service initialized');
+
+        // Set up real-time notification listener
+        const unsubscribe = realTimeNotificationService.addListener((notification) => {
+          console.log('Received real-time notification:', notification);
+          
+          // Add to display notifications
+          const displayNotification: DisplayNotification = {
+            ...notification,
+            isVisible: true
+          };
+          
+          setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]); // Keep max 5
+          
+          // Play notification sound
+          playNotificationSound(notification.priority);
+          
+          // Show toast notification
+          const toastMessage = `${notification.title}: ${notification.message}`;
+          switch (notification.priority) {
+            case 'high':
+              toast.error(toastMessage, { duration: 8000 });
+              break;
+            case 'medium':
+              toast.success(toastMessage, { duration: 5000 });
+              break;
+            case 'low':
+              toast.info(toastMessage, { duration: 3000 });
+              break;
+          }
+        });
+
+        // Monitor connection status
+        const statusInterval = setInterval(() => {
+          const status = realTimeNotificationService.getConnectionStatus();
+          setIsConnected(status.isConnected);
+          setConnectionType(status.connectionType);
+        }, 2000);
+
+        return () => {
+          unsubscribe();
+          clearInterval(statusInterval);
+        };
+      } catch (error) {
+        console.error('Failed to initialize notification services:', error);
+        toast.error('Failed to initialize notifications. Some features may not work.');
       }
     };
 
-    // Add event listeners
-    window.addEventListener('newNotification', handleNewNotification as EventListener);
-    window.addEventListener('pushNotificationReceived', handlePushNotification as EventListener);
-    window.addEventListener('notificationClick', handleNotificationClick as EventListener);
+    initializeServices();
+
+    // Listen for service worker messages (push notifications)
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'PUSH_NOTIFICATION_RECEIVED') {
+        const notificationData = event.data.notificationData;
+        const realTimeNotification: RealTimeNotification = {
+          id: `sw-${Date.now()}`,
+          type: notificationData.type || 'alert',
+          priority: notificationData.priority || 'medium',
+          title: notificationData.title || 'MCM Alert',
+          message: notificationData.body || notificationData.message || 'New notification',
+          timestamp: new Date().toISOString(),
+          data: notificationData.data
+        };
+
+        // Add to display notifications
+        const displayNotification: DisplayNotification = {
+          ...realTimeNotification,
+          isVisible: true
+        };
+        
+        setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]);
+        playNotificationSound(realTimeNotification.priority);
+        
+        console.log('Received push notification from service worker:', realTimeNotification);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    }
 
     // Cleanup
     return () => {
-      window.removeEventListener('newNotification', handleNewNotification as EventListener);
-      window.removeEventListener('pushNotificationReceived', handlePushNotification as EventListener);
-      window.removeEventListener('notificationClick', handleNotificationClick as EventListener);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
+      realTimeNotificationService.disconnect();
+      if (audioContext) {
+        audioContext.close();
+      }
     };
   }, []);
 
-  const generateId = (): string => {
-    return Math.random().toString(36).substr(2, 9);
-  };
+  const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
+    if (!audioContext) return;
 
-  const mapPriorityToType = (priority?: string): 'info' | 'success' | 'warning' | 'error' => {
-    switch (priority) {
-      case 'high': return 'error';
-      case 'medium': return 'warning';
-      case 'low': return 'info';
-      default: return 'info';
+    try {
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Different frequencies for different priorities
+      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
+      const duration = priority === 'high' ? 1.0 : 0.5;
+
+      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      oscillator.type = 'sine';
+
+      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration);
+
+      // For high priority, play a second beep
+      if (priority === 'high') {
+        setTimeout(() => {
+          const oscillator2 = audioContext.createOscillator();
+          const gainNode2 = audioContext.createGain();
+
+          oscillator2.connect(gainNode2);
+          gainNode2.connect(audioContext.destination);
+
+          oscillator2.frequency.setValueAtTime(1000, audioContext.currentTime);
+          oscillator2.type = 'sine';
+          gainNode2.gain.setValueAtTime(0.2, audioContext.currentTime);
+          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+          oscillator2.start(audioContext.currentTime);
+          oscillator2.stop(audioContext.currentTime + 0.3);
+        }, 200);
+      }
+    } catch (error) {
+      console.error('Failed to play notification sound:', error);
     }
   };
 
-  const getAutoCloseDelay = (priority?: string): number => {
-    switch (priority) {
-      case 'high': return 0; // Don't auto close high priority
-      case 'medium': return 8000;
-      case 'low': return 5000;
-      default: return 6000;
-    }
-  };
-
-  const addNotification = (notification: InAppNotification) => {
-    setNotifications(prev => {
-      // Remove duplicate notifications (same ID)
-      const filtered = prev.filter(n => n.id !== notification.id);
-      return [notification, ...filtered].slice(0, 10); // Keep max 10 notifications
-    });
-
-    // Auto remove if specified
-    if (notification.autoClose && notification.autoClose > 0) {
-      setTimeout(() => {
-        removeNotification(notification.id);
-      }, notification.autoClose);
-    }
-  };
-
-  const removeNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  };
-
-  const markAsAcknowledged = (id: string) => {
+  const dismissNotification = (id: string) => {
     setNotifications(prev => 
-      prev.map(n => n.id === id ? { ...n, acknowledged: true } : n)
+      prev.map(n => 
+        n.id === id 
+          ? { ...n, isVisible: false, dismissedAt: Date.now() }
+          : n
+      )
     );
-    
-    // Remove after a short delay to show the acknowledged state
+
+    // Remove after animation
     setTimeout(() => {
-      removeNotification(id);
-    }, 1000);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 300);
   };
 
-  const clearAll = () => {
-    setNotifications([]);
-  };
-
-  const getIcon = (type: string) => {
-    switch (type) {
-      case 'success': return <CheckCircle className="h-5 w-5 text-green-600" />;
-      case 'error': return <AlertCircle className="h-5 w-5 text-red-600" />;
-      case 'warning': return <AlertTriangle className="h-5 w-5 text-yellow-600" />;
-      default: return <Info className="h-5 w-5 text-blue-600" />;
-    }
-  };
-
-  const getBgColor = (type: string, priority: string) => {
-    const baseColors = {
-      success: 'bg-green-50 border-green-200',
-      error: 'bg-red-50 border-red-200',
-      warning: 'bg-yellow-50 border-yellow-200',
-      info: 'bg-blue-50 border-blue-200'
-    };
-
-    if (priority === 'high') {
-      return `${baseColors[type as keyof typeof baseColors]} ring-2 ring-red-300 animate-pulse`;
-    }
-
-    return baseColors[type as keyof typeof baseColors];
-  };
-
-  const getPriorityBadge = (priority: string) => {
-    const colors = {
-      high: 'bg-red-100 text-red-800',
-      medium: 'bg-yellow-100 text-yellow-800',
-      low: 'bg-blue-100 text-blue-800'
-    };
-
-    return (
-      <Badge className={`text-xs ${colors[priority as keyof typeof colors]}`}>
-        {priority.toUpperCase()}
-      </Badge>
+  const clearAllNotifications = () => {
+    setNotifications(prev => 
+      prev.map(n => ({ ...n, isVisible: false, dismissedAt: Date.now() }))
     );
+
+    setTimeout(() => {
+      setNotifications([]);
+    }, 300);
   };
 
-  if (!isVisible || notifications.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="fixed top-4 right-4 z-50 space-y-3 max-w-md">
-      {/* Header with clear all button */}
-      {notifications.length > 1 && (
-        <div className="flex justify-between items-center bg-white rounded-lg shadow-sm border p-2">
-          <div className="flex items-center space-x-2">
-            <Bell className="h-4 w-4 text-gray-600" />
-            <span className="text-sm font-medium text-gray-700">
-              {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <div className="flex space-x-1">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={clearAll}
-              className="text-xs h-6 px-2"
-            >
-              Clear All
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => setIsVisible(false)}
-              className="h-6 w-6 p-0"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Notification list */}
-      {notifications.slice(0, 5).map(notification => (
-        <NotificationItem
-          key={notification.id}
-          notification={notification}
-          onRemove={removeNotification}
-          onAcknowledge={markAsAcknowledged}
-          getIcon={getIcon}
-          getBgColor={getBgColor}
-          getPriorityBadge={getPriorityBadge}
-        />
-      ))}
-
-      {/* Show count if more notifications exist */}
-      {notifications.length > 5 && (
-        <div className="text-center bg-white rounded-lg shadow-sm border p-2">
-          <span className="text-sm text-gray-600">
-            and {notifications.length - 5} more notification{notifications.length - 5 !== 1 ? 's' : ''}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface NotificationItemProps {
-  notification: InAppNotification;
-  onRemove: (id: string) => void;
-  onAcknowledge: (id: string) => void;
-  getIcon: (type: string) => React.ReactNode;
-  getBgColor: (type: string, priority: string) => string;
-  getPriorityBadge: (priority: string) => React.ReactNode;
-}
-
-const NotificationItem: React.FC<NotificationItemProps> = ({
-  notification,
-  onRemove,
-  onAcknowledge,
-  getIcon,
-  getBgColor,
-  getPriorityBadge
-}) => {
-  const [isRemoving, setIsRemoving] = useState(false);
-
-  const handleRemove = () => {
-    setIsRemoving(true);
-    setTimeout(() => onRemove(notification.id), 300);
-  };
-
-  const handleAcknowledge = () => {
-    onAcknowledge(notification.id);
-  };
-
-  const handleClick = () => {
-    if (notification.priority === 'high' && !notification.acknowledged) {
-      handleAcknowledge();
+  const sendTestRealTimeNotification = async () => {
+    try {
+      await realTimeNotificationService.sendTestNotification('medium');
+      toast.success('Test notification sent!');
+    } catch (error) {
+      console.error('Failed to send test notification:', error);
+      toast.error('Failed to send test notification. Check your connection.');
     }
   };
 
+  const getNotificationIcon = (type: string, priority: string) => {
+    if (priority === 'high') {
+      return <AlertCircle className="h-5 w-5 text-red-500" />;
+    }
+    
+    switch (type) {
+      case 'test':
+        return <Bell className="h-5 w-5 text-blue-500" />;
+      case 'system':
+        return <Info className="h-5 w-5 text-blue-500" />;
+      case 'price_change':
+        return <CheckCircle className="h-5 w-5 text-green-500" />;
+      default:
+        return <AlertCircle className="h-5 w-5 text-orange-500" />;
+    }
+  };
+
+  const getPriorityStyles = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return 'bg-red-50 border-red-200 shadow-lg';
+      case 'medium':
+        return 'bg-blue-50 border-blue-200 shadow-md';
+      case 'low':
+        return 'bg-gray-50 border-gray-200 shadow-sm';
+      default:
+        return 'bg-white border-gray-200 shadow-sm';
+    }
+  };
+
+  const visibleNotifications = notifications.filter(n => n.isVisible);
+
   return (
-    <div
-      className={`
-        p-4 rounded-lg border shadow-sm transition-all duration-300 cursor-pointer
-        ${getBgColor(notification.type, notification.priority)}
-        ${isRemoving ? 'opacity-0 transform translate-x-full' : 'opacity-100 transform translate-x-0'}
-        ${notification.acknowledged ? 'opacity-50' : ''}
-        animate-in slide-in-from-right-full
-      `}
-      onClick={handleClick}
-    >
-      <div className="flex items-start justify-between">
-        <div className="flex items-start space-x-3 flex-1">
-          {getIcon(notification.type)}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-1">
-              <h4 className="font-medium text-gray-900 text-sm truncate">
-                {notification.title}
-              </h4>
-              {getPriorityBadge(notification.priority)}
-            </div>
-            <p className="text-sm text-gray-700 leading-relaxed mb-2">
-              {notification.body}
-            </p>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">
-                {notification.timestamp.toLocaleTimeString()}
-              </p>
-              {notification.acknowledged && (
-                <span className="text-xs text-green-600 font-medium">
-                  ✓ Acknowledged
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-1 ml-2">
-          {notification.priority === 'high' && !notification.acknowledged && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAcknowledge();
-              }}
-              className="h-6 px-2 text-xs bg-white hover:bg-gray-50"
-            >
-              Ack
-            </Button>
+    <>
+      {/* Connection Status Indicator */}
+      <div className="fixed top-4 left-4 z-40">
+        <Badge 
+          variant={isConnected ? "default" : "destructive"}
+          className="flex items-center gap-1"
+        >
+          {isConnected ? (
+            <Wifi className="h-3 w-3" />
+          ) : (
+            <WifiOff className="h-3 w-3" />
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRemove();
-            }}
-            className="h-6 w-6 p-0 hover:bg-white hover:bg-opacity-80"
-          >
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
+          {isConnected ? `Connected (${connectionType})` : 'Disconnected'}
+        </Badge>
       </div>
-    </div>
+
+      {/* Test Button - Remove in production */}
+      <div className="fixed bottom-4 left-4 z-40">
+        <Button
+          onClick={sendTestRealTimeNotification}
+          variant="outline"
+          size="sm"
+          className="bg-white/90 backdrop-blur-sm"
+        >
+          <Bell className="h-4 w-4 mr-2" />
+          Test Real-time
+        </Button>
+      </div>
+
+      {/* Notification Container */}
+      {visibleNotifications.length > 0 && (
+        <div className="fixed top-16 right-4 z-50 space-y-3 max-w-sm">
+          {/* Clear All Button */}
+          {visibleNotifications.length > 1 && (
+            <div className="text-center">
+              <Button
+                onClick={clearAllNotifications}
+                variant="outline"
+                size="sm"
+                className="bg-white/90 backdrop-blur-sm"
+              >
+                Clear All ({visibleNotifications.length})
+              </Button>
+            </div>
+          )}
+
+          {/* Notification Items */}
+          {visibleNotifications.map((notification) => (
+            <div
+              key={notification.id}
+              className={`
+                p-4 rounded-lg border transition-all duration-300 ease-in-out
+                ${getPriorityStyles(notification.priority)}
+                ${notification.isVisible 
+                  ? 'animate-in slide-in-from-right-full opacity-100 scale-100' 
+                  : 'animate-out slide-out-to-right-full opacity-0 scale-95'
+                }
+              `}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 flex-1">
+                  {getNotificationIcon(notification.type, notification.priority)}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-gray-900 text-sm truncate">
+                        {notification.title}
+                      </h4>
+                      <Badge 
+                        variant={notification.priority === 'high' ? 'destructive' : 'outline'}
+                        className="text-xs flex-shrink-0"
+                      >
+                        {notification.priority.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-gray-700 leading-5 break-words">
+                      {notification.message}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">
+                      {new Date(notification.timestamp).toLocaleTimeString()}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => dismissNotification(notification.id)}
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 flex-shrink-0 hover:bg-white/50"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 };
 
