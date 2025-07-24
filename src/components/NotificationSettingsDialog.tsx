@@ -605,4 +605,4 @@ const NotificationApp: React.FC = () => {
 };
 
 export default NotificationApp;
-export { NotificationSettingsDialog, NotificationProvider, useNotifications, NotificationService };
+export { NotificationSettingsDialog };
