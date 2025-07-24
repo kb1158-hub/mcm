@@ -2,8 +2,8 @@ export class PushNotificationService {
   private registration: ServiceWorkerRegistration | null = null;
   private isStackBlitz = false;
   private audioContext: AudioContext | null = null;
-  private pollingInterval: number | null = null;
-  private lastNotificationCheck = 0;
+  private notificationQueue: Array<{title: string, body: string, priority: 'low' | 'medium' | 'high'}> = [];
+  private isProcessingQueue = false;
 
   constructor() {
     this.isStackBlitz = window.location.hostname.includes('stackblitz') ||
@@ -14,162 +14,181 @@ export class PushNotificationService {
   async initialize() {
     if (this.isStackBlitz) {
       console.warn('Service Workers are not supported in this environment. Using fallback notification methods.');
-      this.startNotificationPolling();
       return;
     }
 
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       try {
         this.registration = await navigator.serviceWorker.register('/service-worker.js', {
-          scope: '/',
-          updateViaCache: 'none'
+          scope: '/'
         });
-        
         console.log('Service Worker registered:', this.registration);
 
-        // Wait for service worker to be ready
         await navigator.serviceWorker.ready;
 
-        // Handle service worker updates
-        this.registration.addEventListener('updatefound', () => {
-          const newWorker = this.registration!.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('New service worker installed, will update on next page load');
-              }
-            });
-          }
-        });
-
-        // Listen for messages from service worker
+        // Enhanced message handling for real-time notifications
         navigator.serviceWorker.addEventListener('message', this.handleServiceWorkerMessage.bind(this));
-
-        // Start real-time notification polling
-        this.startNotificationPolling();
-
+        
+        // Listen for push events from service worker
+        this.setupPushEventListener();
+        
       } catch (error) {
         console.error('Service Worker registration failed:', error);
-        // Fallback to polling without service worker
-        this.startNotificationPolling();
       }
-    } else {
-      console.warn('Service Workers or Push Manager not supported');
-      this.startNotificationPolling();
     }
 
     this.initializeAudio();
+    this.setupVisibilityListener();
   }
 
-  private startNotificationPolling() {
-    // Poll for new notifications every 30 seconds
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
-
-    this.pollingInterval = window.setInterval(async () => {
-      try {
-        await this.checkForNewNotifications();
-      } catch (error) {
-        console.error('Error checking for notifications:', error);
-      }
-    }, 30000); // 30 seconds
-
-    // Initial check
-    this.checkForNewNotifications();
-  }
-
-  private async checkForNewNotifications() {
-    try {
-      const response = await fetch(`/api/notifications/recent?since=${this.lastNotificationCheck}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const notifications = await response.json();
+  private setupPushEventListener() {
+    // Listen for messages from service worker about push notifications
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'PUSH_NOTIFICATION_RECEIVED') {
+        const { notificationData } = event.data;
         
-        if (notifications && notifications.length > 0) {
-          console.log(`Found ${notifications.length} new notifications`);
-          
-          for (const notification of notifications) {
-            await this.showRealtimeNotification(notification);
-          }
-          
-          this.lastNotificationCheck = Date.now();
+        // Show in-app notification immediately if page is visible
+        if (document.visibilityState === 'visible') {
+          this.showInAppNotification(notificationData);
         }
+        
+        // Always play sound for API notifications
+        this.playNotificationSound(notificationData.priority || 'medium');
+        
+        // Dispatch custom event for app components to listen
+        window.dispatchEvent(new CustomEvent('api-notification-received', {
+          detail: notificationData
+        }));
       }
-    } catch (error) {
-      console.error('Failed to check for new notifications:', error);
-    }
+    });
   }
 
-  private async showRealtimeNotification(notification: any) {
-    const title = notification.title || 'MCM Alert';
-    const body = notification.message || notification.body || 'New notification received';
-    const priority = notification.priority || 'medium';
+  private setupVisibilityListener() {
+    // Handle visibility changes for better mobile behavior
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.notificationQueue.length > 0) {
+        this.processNotificationQueue();
+      }
+    });
+  }
 
-    // Show notification with proper mobile handling
-    await this.sendNotification(title, body, priority);
+  private async processNotificationQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.notificationQueue.length > 0) {
+      const notification = this.notificationQueue.shift();
+      if (notification) {
+        await this.showInAppNotification(notification);
+        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between notifications
+      }
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  private showInAppNotification(notification: {title: string, body: string, priority: 'low' | 'medium' | 'high'}) {
+    // Create in-app notification element
+    const notificationEl = document.createElement('div');
+    notificationEl.className = `fixed top-4 right-4 z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-4 max-w-sm transform translate-x-full transition-transform duration-300 ease-out`;
+    
+    // Priority-based styling
+    const priorityClasses = {
+      high: 'border-l-4 border-l-red-500 bg-red-50 dark:bg-red-900/20',
+      medium: 'border-l-4 border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/20',
+      low: 'border-l-4 border-l-blue-500 bg-blue-50 dark:bg-blue-900/20'
+    };
+    
+    notificationEl.className += ` ${priorityClasses[notification.priority]}`;
+    
+    notificationEl.innerHTML = `
+      <div class="flex items-start gap-3">
+        <div class="flex-1">
+          <h4 class="font-semibold text-gray-900 dark:text-gray-100 text-sm">${notification.title}</h4>
+          <p class="text-gray-700 dark:text-gray-300 text-sm mt-1">${notification.body}</p>
+          <p class="text-gray-500 dark:text-gray-400 text-xs mt-2">${new Date().toLocaleTimeString()}</p>
+        </div>
+        <button class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 ml-2" onclick="this.parentElement.parentElement.remove()">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(notificationEl);
+    
+    // Animate in
+    setTimeout(() => {
+      notificationEl.style.transform = 'translateX(0)';
+    }, 100);
+    
+    // Auto remove after delay
+    setTimeout(() => {
+      notificationEl.style.transform = 'translateX(100%)';
+      setTimeout(() => {
+        if (notificationEl.parentElement) {
+          notificationEl.remove();
+        }
+      }, 300);
+    }, notification.priority === 'high' ? 8000 : 5000);
   }
 
   private initializeAudio() {
-    // Initialize audio context on user interaction
-    const initAudio = () => {
-      try {
-        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        document.removeEventListener('click', initAudio);
-        document.removeEventListener('touchstart', initAudio);
-      } catch (error) {
-        console.warn('Audio context not supported:', error);
-      }
-    };
-
-    document.addEventListener('click', initAudio, { once: true });
-    document.addEventListener('touchstart', initAudio, { once: true });
+    try {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } catch (error) {
+      console.warn('Audio context not supported:', error);
+    }
   }
 
   private handleServiceWorkerMessage(event: MessageEvent) {
-    console.log('Received message from service worker:', event.data);
-    
     if (event.data?.type === 'PLAY_NOTIFICATION_SOUND') {
       this.playNotificationSound(event.data.priority);
-    } else if (event.data?.type === 'NOTIFICATION_CLICKED') {
-      // Handle notification click events
-      console.log('Notification was clicked:', event.data);
     }
   }
 
   private async playNotificationSound(priority: 'low' | 'medium' | 'high' = 'medium') {
     try {
-      if (!this.audioContext) {
-        return;
-      }
+      if (!this.audioContext) return;
 
       if (this.audioContext.state === 'suspended') {
         await this.audioContext.resume();
       }
 
-      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
-      const duration = priority === 'high' ? 1000 : 500;
+      const soundConfig = {
+        low: { frequency: 400, duration: 0.3, volume: 0.1 },
+        medium: { frequency: 600, duration: 0.5, volume: 0.2 },
+        high: { frequency: 800, duration: 1.0, volume: 0.3 }
+      };
 
-      const oscillator = this.audioContext.createOscillator();
-      const gainNode = this.audioContext.createGain();
+      const config = soundConfig[priority];
+      
+      // Create multiple tones for high priority
+      const tones = priority === 'high' ? 
+        [{ freq: 800, dur: 0.2 }, { freq: 1000, dur: 0.2 }, { freq: 800, dur: 0.2 }] : 
+        [{ freq: config.frequency, dur: config.duration }];
 
-      oscillator.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
+      let startTime = this.audioContext.currentTime;
+      
+      for (const tone of tones) {
+        const oscillator = this.audioContext.createOscillator();
+        const gainNode = this.audioContext.createGain();
 
-      oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime);
-      oscillator.type = 'sine';
+        oscillator.connect(gainNode);
+        gainNode.connect(this.audioContext.destination);
 
-      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
-      gainNode.gain.setValueAtTime(volume, this.audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + duration / 1000);
+        oscillator.frequency.setValueAtTime(tone.freq, startTime);
+        oscillator.type = priority === 'high' ? 'square' : 'sine';
 
-      oscillator.start(this.audioContext.currentTime);
-      oscillator.stop(this.audioContext.currentTime + duration / 1000);
+        gainNode.gain.setValueAtTime(config.volume, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + tone.dur);
+
+        oscillator.start(startTime);
+        oscillator.stop(startTime + tone.dur);
+        
+        startTime += tone.dur + (priority === 'high' ? 0.1 : 0);
+      }
 
       console.log(`Played ${priority} priority notification sound`);
     } catch (error) {
@@ -184,13 +203,7 @@ export class PushNotificationService {
     }
 
     try {
-      let permission = Notification.permission;
-      
-      if (permission === 'default') {
-        // Request permission with user gesture
-        permission = await Notification.requestPermission();
-      }
-      
+      const permission = await Notification.requestPermission();
       console.log('Notification permission result:', permission);
 
       if (permission === 'denied') {
@@ -220,27 +233,18 @@ export class PushNotificationService {
 
     if (this.registration) {
       try {
-        // Check if already subscribed
-        const existingSubscription = await this.registration.pushManager.getSubscription();
-        if (existingSubscription) {
-          console.log('Already subscribed to push notifications');
-          return existingSubscription;
-        }
-
         const subscription = await this.registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: this.urlB64ToUint8Array(
             'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAKeFXjWWqlaGSb0TSa1TCEdqNB0NDrWJZnIa5oZUMoMJpE'
           )
         });
-        
         console.log('Push subscription:', subscription);
 
         await this.sendSubscriptionToBackend(subscription);
         return subscription;
       } catch (error) {
         console.error('Failed to subscribe to push notifications:', error);
-        throw error;
       }
     }
     return null;
@@ -263,13 +267,10 @@ export class PushNotificationService {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to send subscription to backend: ${response.status}`);
+        throw new Error('Failed to send subscription to backend');
       }
-
-      console.log('Subscription sent to backend successfully');
     } catch (error) {
       console.error('Error sending subscription to backend:', error);
-      throw error;
     }
   }
 
@@ -296,143 +297,175 @@ export class PushNotificationService {
     return outputArray;
   }
 
+  // Enhanced method for real-time API notifications
+  async showApiNotification(title: string, body: string, priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
+    console.log('Showing API notification:', { title, body, priority });
+    
+    // Always play sound immediately for API notifications
+    await this.playNotificationSound(priority);
+    
+    // Check if page is visible
+    if (document.visibilityState === 'visible') {
+      // Show in-app notification immediately
+      this.showInAppNotification({ title, body, priority });
+    } else {
+      // Queue for when page becomes visible
+      this.notificationQueue.push({ title, body, priority });
+    }
+
+    // Try to show browser notification if permission granted
+    const hasPermission = Notification.permission === 'granted';
+    if (hasPermission) {
+      try {
+        await this.showServiceWorkerNotification(title, body, priority);
+      } catch (error) {
+        console.warn('Service Worker notification failed:', error);
+        // Fallback to direct notification for desktop
+        if (!this.isMobileDevice()) {
+          this.showDirectNotification(title, body, priority);
+        }
+      }
+    }
+  }
+
+  private isMobileDevice(): boolean {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           window.matchMedia('(display-mode: standalone)').matches;
+  }
+
+  private showDirectNotification(title: string, body: string, priority: 'low' | 'medium' | 'high') {
+    try {
+      const notification = new Notification(title, {
+        body,
+        icon: '/mcm-logo-192.png',
+        badge: '/mcm-logo-192.png',
+        tag: 'mcm-api-notification',
+        requireInteraction: priority === 'high',
+        silent: false,
+        vibrate: this.getVibratePattern(priority),
+        data: {
+          priority,
+          timestamp: Date.now()
+        }
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
+      // Auto-close after delay
+      setTimeout(() => {
+        try {
+          notification.close();
+        } catch (e) {}
+      }, priority === 'high' ? 10000 : 5000);
+
+    } catch (error) {
+      console.error('Direct notification failed:', error);
+    }
+  }
+
+  private getVibratePattern(priority: 'low' | 'medium' | 'high'): number[] {
+    switch (priority) {
+      case 'high': return [300, 100, 300, 100, 300];
+      case 'medium': return [200, 100, 200];
+      case 'low': return [100];
+      default: return [200, 100, 200];
+    }
+  }
+
   private async showServiceWorkerNotification(title: string, body: string, priority: 'low' | 'medium' | 'high'): Promise<boolean> {
     try {
       if (!this.registration) {
-        throw new Error('Service Worker not registered');
+        await this.initialize();
       }
 
-      if (!this.registration.active) {
-        throw new Error('Service Worker not active');
-      }
+      if (this.registration) {
+        const messageChannel = new MessageChannel();
+        
+        return new Promise((resolve, reject) => {
+          messageChannel.port1.onmessage = (event) => {
+            if (event.data.success) {
+              console.log('Service Worker notification sent successfully');
+              resolve(true);
+            } else {
+              console.error('Service Worker notification failed:', event.data.error);
+              reject(new Error(event.data.error));
+            }
+          };
 
-      // Use MessageChannel for reliable communication
-      const messageChannel = new MessageChannel();
+          this.registration!.active?.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title,
+            body,
+            priority,
+            icon: '/mcm-logo-192.png',
+            badge: '/mcm-logo-192.png',
+            tag: 'mcm-api-notification',
+            requireInteraction: priority === 'high',
+            silent: false,
+            vibrate: this.getVibratePattern(priority),
+            actions: priority === 'high' ? [
+              { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' }
+            ] : [
+              { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+              { action: 'dismiss', title: 'Dismiss' }
+            ],
+            data: {
+              url: window.location.origin,
+              priority: priority,
+              timestamp: Date.now(),
+              source: 'api'
+            }
+          }, [messageChannel.port2]);
+
+          setTimeout(() => {
+            reject(new Error('Service Worker notification timeout'));
+          }, 5000);
+        });
+      }
       
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Service Worker notification timeout'));
-        }, 10000);
-
-        messageChannel.port1.onmessage = (event) => {
-          clearTimeout(timeout);
-          if (event.data.success) {
-            console.log('Service Worker notification sent successfully');
-            resolve(true);
-          } else {
-            console.error('Service Worker notification failed:', event.data.error);
-            reject(new Error(event.data.error || 'Service Worker notification failed'));
-          }
-        };
-
-        // Send message to service worker
-        this.registration!.active!.postMessage({
-          type: 'SHOW_NOTIFICATION',
-          title,
-          body,
-          priority,
-          icon: '/mcm-logo-192.png',
-          badge: '/mcm-logo-192.png',
-          tag: `mcm-notification-${Date.now()}`,
-          requireInteraction: priority === 'high',
-          silent: false,
-          vibrate: priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
-          actions: [
-            { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
-            { action: 'dismiss', title: 'Dismiss' }
-          ],
-          data: {
-            url: '/',
-            priority: priority,
-            timestamp: Date.now()
-          }
-        }, [messageChannel.port2]);
-      });
+      throw new Error('Service Worker not available');
     } catch (error) {
       console.error('Service Worker notification failed:', error);
       throw error;
     }
   }
 
-  private showFallbackNotification(title: string, body: string, priority: 'low' | 'medium' | 'high') {
-    console.log('Using fallback notification method');
-    
-    // Play sound
-    this.playNotificationSound(priority);
-    
-    // Dispatch custom event for in-app notification
-    window.dispatchEvent(new CustomEvent('fallback-notification', {
-      detail: { title, body, priority }
-    }));
-
-    // Try browser notification API as last resort (desktop only)
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    
-    if (!isMobile && !isStandalone && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        const notification = new Notification(title, {
-          body,
-          icon: '/mcm-logo-192.png',
-          tag: `mcm-fallback-${Date.now()}`,
-          requireInteraction: priority === 'high',
-          silent: false
-        });
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-
-        setTimeout(() => {
-          notification.close();
-        }, priority === 'high' ? 10000 : 5000);
-
-      } catch (error) {
-        console.error('Fallback browser notification failed:', error);
-      }
-    }
-  }
-
-  async sendNotification(title: string, body: string, priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
-    // Always try to get permission first
-    const hasPermission = await this.requestPermission().catch(() => false);
-    
-    if (!hasPermission) {
-      console.warn('Notification permission not granted, using fallback');
-      this.showFallbackNotification(title, body, priority);
-      return;
-    }
-
-    // Resume audio context if needed
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      try {
-        await this.audioContext.resume();
-      } catch (error) {
-        console.error('Failed to resume audio context:', error);
-      }
-    }
-
-    // Try Service Worker notification first (works on mobile)
-    if (!this.isStackBlitz && 'serviceWorker' in navigator && this.registration) {
-      try {
-        await this.showServiceWorkerNotification(title, body, priority);
-        console.log('Service Worker notification sent successfully');
-        return;
-      } catch (error) {
-        console.error('Service Worker notification failed, using fallback:', error);
-      }
-    }
-
-    // Fallback notification
-    this.showFallbackNotification(title, body, priority);
-  }
-
   async sendTestNotification(priority: 'low' | 'medium' | 'high' = 'medium'): Promise<void> {
     const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
     const body = `Test notification from MCM Alerts system (${priority} priority) - ${new Date().toLocaleTimeString()}`;
 
-    await this.sendNotification(title, body, priority);
+    const hasPermission = await this.requestPermission();
+    if (!hasPermission) {
+      console.warn('Notification permission not granted');
+      throw new Error('Notification permission not granted');
+    }
+
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    // Always try Service Worker first for consistency
+    if (!this.isStackBlitz && 'serviceWorker' in navigator) {
+      try {
+        await this.showServiceWorkerNotification(title, body, priority);
+        console.log('Service Worker test notification sent successfully');
+      } catch (error) {
+        console.error('Service Worker test notification failed, using fallback:', error);
+        if (!this.isMobileDevice()) {
+          this.showDirectNotification(title, body, priority);
+        }
+      }
+    } else {
+      if (!this.isMobileDevice()) {
+        this.showDirectNotification(title, body, priority);
+      }
+    }
+
+    // Always show in-app notification for tests
+    this.showInAppNotification({ title, body, priority });
 
     // Store notification in backend
     try {
@@ -451,14 +484,13 @@ export class PushNotificationService {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        console.warn(`Backend storage failed with status: ${response.status}`);
+      } else {
+        const result = await response.json();
+        console.log('Test notification stored in backend:', result);
       }
-
-      const result = await response.json();
-      console.log('Notification stored in backend:', result);
     } catch (error) {
-      console.error('Failed to store notification in backend:', error);
-      // Don't throw here - notification was shown successfully
+      console.error('Failed to store test notification in backend:', error);
     }
   }
 
@@ -467,41 +499,19 @@ export class PushNotificationService {
       return false;
     }
 
-    // Clear polling
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-    }
-
     if (!this.registration) {
-      return false;
+      await this.initialize();
     }
 
-    try {
+    if (this.registration) {
       const subscription = await this.registration.pushManager.getSubscription();
       if (subscription) {
         await subscription.unsubscribe();
         console.log('Push subscription cancelled.');
         return true;
       }
-    } catch (error) {
-      console.error('Failed to unsubscribe:', error);
     }
-    
     return false;
-  }
-
-  // Cleanup method
-  destroy() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-    }
-
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
   }
 }
 
