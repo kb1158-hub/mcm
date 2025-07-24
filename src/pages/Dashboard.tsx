@@ -495,12 +495,17 @@ const Dashboard: React.FC = () => {
       
       {/* Main container with proper spacing */}
       <main className="container mx-auto px-4 py-6">
-        {/* Enhanced Top Panel with Icons */}
+        {/* Enhanced Top Panel with App Title and User Info */}
         <div className="bg-white/50 backdrop-blur-sm border border-border/50 rounded-lg p-4 mb-6 shadow-sm">
           <div className="flex items-center justify-between">
-            {/* Left side - App branding/title */}
-            <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
+            {/* Left side - App Title and User Info */}
+            <div className="flex flex-col">
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">MCM Alerts</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-sm font-medium text-muted-foreground">MCM User</span>
+                <span className="text-xs text-muted-foreground">•</span>
+                <span className="text-sm text-muted-foreground">user@mcm-alerts.com</span>
+              </div>
             </div>
             
             {/* Right side - Action buttons */}
