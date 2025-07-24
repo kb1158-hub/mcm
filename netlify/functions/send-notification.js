@@ -7,8 +7,8 @@ const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsI
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // VAPID keys - in production, these should be environment variables
-const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAKeFXjWWqlaGSb0TSa1TCEdqNB0NDrWJZnIa5oZUMoMJpE';
-const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || 'your-vapid-private-key-here';
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || 'BCk21-ioklyur883nJg0PbBZxhkOvVzvmUzASZHLwHTW6qQjnkNdjo0GU23LycsD9Om27Ihx8qXfDEGqFqaePDc';
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || 'FwsCgU_4VgoOHZEULdOPh2HfohEaakY3mYHGjjKx3XI';
 
 webpush.setVapidDetails(
   'mailto:admin@mcm-alerts.com',
