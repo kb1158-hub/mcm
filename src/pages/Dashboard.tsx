@@ -495,51 +495,60 @@ const Dashboard: React.FC = () => {
       
       {/* Main container with proper spacing */}
       <main className="container mx-auto px-4 py-6">
-        {/* Header with Settings, Notifications, and Logout */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            {/* Settings Icon */}
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="flex items-center gap-2"
-              onClick={() => navigate('/settings')}
-            >
-              <Settings className="h-4 w-4" />
-              <span>Settings</span>
-            </Button>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {/* Notifications Bell with Unread Count */}
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="relative flex items-center gap-2"
-              onClick={() => { navigate('/notifications'); markAsRead(); }}
-            >
-              <Bell className="h-4 w-4" />
-              <span>Notifications</span>
-              {unreadCount > 0 && (
-                <Badge 
-                  variant="destructive" 
-                  className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs font-bold"
-                >
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </Badge>
-              )}
-            </Button>
+        {/* Enhanced Top Panel with Icons */}
+        <div className="bg-white/50 backdrop-blur-sm border border-border/50 rounded-lg p-4 mb-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            {/* Left side - App branding/title */}
+            <div className="flex items-center">
+              <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
+            </div>
             
-            {/* Logout Button */}
-            <Button 
-              onClick={handleLogout} 
-              variant="outline" 
-              size="sm"
-              className="flex items-center gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Logout</span>
-            </Button>
+            {/* Right side - Action buttons */}
+            <div className="flex items-center gap-3">
+              {/* Settings Button */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="flex items-center gap-2 hover:bg-accent/50 transition-colors"
+                onClick={() => navigate('/settings')}
+              >
+                <Settings className="h-4 w-4" />
+                <span className="hidden sm:inline">Settings</span>
+              </Button>
+              
+              {/* Notifications Bell with Badge */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="relative flex items-center gap-2 hover:bg-accent/50 transition-colors"
+                onClick={() => { navigate('/notifications'); markAsRead(); }}
+              >
+                <Bell className="h-4 w-4" />
+                <span className="hidden sm:inline">Notifications</span>
+                {unreadCount > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs font-bold animate-pulse"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Badge>
+                )}
+              </Button>
+              
+              {/* Divider */}
+              <div className="w-px h-6 bg-border/50"></div>
+              
+              {/* Logout Button */}
+              <Button 
+                onClick={handleLogout} 
+                variant="ghost" 
+                size="sm"
+                className="flex items-center gap-2 hover:bg-destructive/10 hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Logout</span>
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -651,87 +660,91 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
               
-              <CardContent onClick={markAsRead}>
-                {isLoading ? (
-                  <div className="text-center py-6">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                    <p className="text-sm mt-2 text-muted-foreground">Loading notifications...</p>
-                  </div>
-                ) : filteredNotifications.length === 0 ? (
-                  <div className="text-center py-6">
-                    {searchTerm || filterType !== "all" || filterPriority !== "all" ? (
-                      <>
-                        <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>No notifications match your filters</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Try adjusting your search or filters
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-muted-foreground">No notifications yet</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Test notifications to see them here
-                        </p>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="max-h-96 overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-                    {filteredNotifications.map((n) => (
-                      <div 
-                        key={n.id} 
-                        className={`p-4 rounded-lg border transition-all duration-200 ${
-                          !n.acknowledged 
-                            ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100 border-l-4 border-l-blue-500' 
-                            : 'bg-muted/30 border-border'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <div className="font-semibold text-sm truncate">{n.title}</div>
-                            {!n.acknowledged && (
-                              <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium flex-shrink-0">
-                                New
-                              </Badge>
-                            )}
+              <CardContent className="p-0">
+                <div className="px-6 pb-4" onClick={markAsRead}>
+                  {isLoading ? (
+                    <div className="text-center py-6">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                      <p className="text-sm mt-2 text-muted-foreground">Loading notifications...</p>
+                    </div>
+                  ) : filteredNotifications.length === 0 ? (
+                    <div className="text-center py-6">
+                      {searchTerm || filterType !== "all" || filterPriority !== "all" ? (
+                        <>
+                          <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                          <p>No notifications match your filters</p>
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Try adjusting your search or filters
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-muted-foreground">No notifications yet</p>
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Test notifications to see them here
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="max-h-96 overflow-y-auto px-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                      <div className="space-y-3 pr-2">
+                        {filteredNotifications.map((n) => (
+                          <div 
+                            key={n.id} 
+                            className={`p-4 rounded-lg border transition-all duration-200 ${
+                              !n.acknowledged 
+                                ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100 border-l-4 border-l-blue-500' 
+                                : 'bg-muted/30 border-border'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <div className="font-semibold text-sm truncate">{n.title}</div>
+                                {!n.acknowledged && (
+                                  <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium flex-shrink-0">
+                                    New
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <Badge 
+                                  variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}
+                                  className="text-xs"
+                                >
+                                  {n.priority || 'medium'}
+                                </Badge>
+                                {!n.acknowledged && (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      acknowledgeNotification(n.id);
+                                    }}
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 w-7 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-200"
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-sm text-foreground/80 mb-2 leading-relaxed">{n.body}</div>
+                            <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
+                              {new Date(n.created_at).toLocaleString()}
+                              {n.acknowledged && (
+                                <span className="flex items-center gap-1 text-green-600 font-medium">
+                                  <Check className="h-3 w-3" />
+                                  Read
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <Badge 
-                              variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}
-                              className="text-xs"
-                            >
-                              {n.priority || 'medium'}
-                            </Badge>
-                            {!n.acknowledged && (
-                              <Button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  acknowledgeNotification(n.id);
-                                }}
-                                size="sm"
-                                variant="outline"
-                                className="h-7 w-7 p-0 text-blue-600 hover:text-blue-800 hover:bg-blue-100 border-blue-200"
-                              >
-                                <Check className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-sm text-foreground/80 mb-2 leading-relaxed">{n.body}</div>
-                        <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
-                          {new Date(n.created_at).toLocaleString()}
-                          {n.acknowledged && (
-                            <span className="flex items-center gap-1 text-green-600 font-medium">
-                              <Check className="h-3 w-3" />
-                              Read
-                            </span>
-                          )}
-                        </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -741,13 +754,6 @@ const Dashboard: React.FC = () => {
                 <CardTitle className="text-center">🔔 Notification Controls</CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
-                <Button 
-                  onClick={() => sendTestNotification('medium')} 
-                  className="w-full mb-4 bg-primary hover:bg-primary/90"
-                  disabled={isLoading}
-                >
-                  {isLoading ? "Sending..." : "Send Test Alert"}
-                </Button>
                 <div className="grid grid-cols-3 gap-2">
                   <Button 
                     variant="outline" 
@@ -778,8 +784,8 @@ const Dashboard: React.FC = () => {
                   </Button>
                 </div>
                 {!notificationsEnabled && (
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    Click test to enable browser notifications
+                  <p className="text-xs text-muted-foreground mt-3 text-center">
+                    Click any button to enable browser notifications
                   </p>
                 )}
               </CardContent>
