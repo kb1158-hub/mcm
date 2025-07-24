@@ -63,7 +63,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "web-push": "^3.6.7",
     "@eslint/js": "^9.9.0",
     "@tailwindcss/typography": "^0.5.15",
     "@types/node": "^22.5.5",
@@ -80,11 +79,6 @@
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
-    "vite": "^5.4.1",
-    "vite-plugin-pwa": "^1.0.1",
-    "workbox-precaching": "^7.3.0",
-    "workbox-routing": "^7.3.0",
-    "workbox-strategies": "^7.3.0",
-    "workbox-expiration": "^7.3.0"
+    "vite": "^5.4.1"
   }
 }
