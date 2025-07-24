@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface AuthContextType {
   isAuthenticated: boolean;
+  user?: { name: string; email: string } | null;
   login: (username: string, password: string) => boolean;
   logout: () => void;
 }
@@ -18,17 +19,20 @@ export const useAuth = () => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
 
   useEffect(() => {
     const authStatus = localStorage.getItem('mcm-auth');
     if (authStatus === 'true') {
       setIsAuthenticated(true);
+      setUser({ name: 'MCM User', email: 'user@mcm-alerts.com' });
     }
   }, []);
 
   const login = (username: string, password: string): boolean => {
     if (username === 'user' && password === '123456') {
       setIsAuthenticated(true);
+      setUser({ name: 'MCM User', email: 'user@mcm-alerts.com' });
       localStorage.setItem('mcm-auth', 'true');
       return true;
     }
@@ -37,11 +41,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setIsAuthenticated(false);
+    setUser(null);
     localStorage.removeItem('mcm-auth');
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
