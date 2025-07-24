@@ -16,20 +16,35 @@ export default defineConfig(({ mode }) => ({
     VitePWA({
       registerType: 'autoUpdate',
       strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'service-worker.js',
       injectManifest: {
-        swSrc: 'src/service-worker.js', // Your actual SW
-        
-      },
-      workbox: {
+        swSrc: 'src/service-worker.js',
+        swDest: 'service-worker.js',
         globPatterns: [
           '**/*.{js,css,html,ico,png,svg,json,webmanifest}',
         ],
+        // Include additional files that might be needed
+        additionalManifestEntries: [
+          { url: '/', revision: null },
+          { url: '/mcm-logo-192.png', revision: null },
+          { url: '/mcm-logo-512.png', revision: null }
+        ],
+        // Exclude large files that don't need caching
+        globIgnores: [
+          '**/node_modules/**/*',
+          '**/.*',
+          '**/*.map'
+        ]
       },
       manifest: {
         name: 'MCM Alerts',
         short_name: 'MCM Alerts',
         description: 'MCM Alerts Application',
         theme_color: '#ffffff',
+        background_color: '#ffffff',
+        display: 'standalone',
+        start_url: '/',
         icons: [
           {
             src: 'mcm-logo-192.png',
@@ -54,4 +69,18 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Build configuration to handle the PWA properly
+  build: {
+    rollupOptions: {
+      // Handle large chunks warning
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-switch'],
+        }
+      }
+    },
+    // Increase chunk size warning limit
+    chunkSizeWarningLimit: 1000
+  }
 }));
