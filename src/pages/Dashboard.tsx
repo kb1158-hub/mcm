@@ -4,11 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
-import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell } from 'lucide-react';
+import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell, User, ChevronDown, Menu, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
 
@@ -23,7 +25,7 @@ interface Notification {
 }
 
 const Dashboard: React.FC = () => {
-  const { logout, user } = useAuth();
+  const { logout, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -32,6 +34,7 @@ const Dashboard: React.FC = () => {
   const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -480,43 +483,190 @@ const Dashboard: React.FC = () => {
 }`;
 
   // Prepare user display values (with fallback)
-  const displayName = user?.name || 'MCM User';
-  const userEmail = user?.email || 'user@mcm-alerts.com';
+  const displayName = 'MCM User';
+  const userEmail = 'user@mcm-alerts.com';
 
   return (
     <div className="min-h-screen bg-background">
       <main className="container mx-auto px-2 md:px-4 py-6">
 
-        {/* Header Bar - Improved Responsive Layout */}
-        <div className="bg-white/50 backdrop-blur-sm border border-border/50 rounded-lg p-4 mb-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2 sm:gap-0">
-            {/* Logo + App Name */}
-            <div className="flex items-center gap-2 mx-auto sm:mx-0">
-              <img src="/mcm-logo-192.png" alt="MCM Logo" className="h-7 w-7" />
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">MCM Alerts</h1>
+        {/* Enhanced Header Bar with Better UX/UI */}
+        <header className="bg-card/80 backdrop-blur-md border border-border/50 rounded-xl p-4 mb-6 shadow-lg">
+          <div className="flex items-center justify-between">
+            {/* Left: Logo + App Name */}
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <img 
+                  src="/mcm-logo-192.png" 
+                  alt="MCM Logo" 
+                  className="h-8 w-8 rounded-lg shadow-sm ring-2 ring-primary/10" 
+                />
+                <div className="absolute -top-1 -right-1 h-3 w-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-foreground">MCM Alerts</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">Real-time Monitoring System</p>
+              </div>
             </div>
-            {/* Right: user pill + actions (responsive) */}
-            <div className="flex flex-col sm:flex-row items-center sm:gap-3 gap-1 mt-2 sm:mt-0 w-full sm:w-auto">
-              <div className="flex items-center justify-center gap-2 bg-accent/30 px-2 py-1 rounded-full text-xs w-full sm:w-auto max-w-full">
-                <span className="font-medium truncate">{displayName}</span>
-                <span className="hidden sm:inline text-muted-foreground">•</span>
-                <span className="text-muted-foreground truncate max-w-[110px]">{userEmail}</span>
+
+            {/* Center: Status Indicators (hidden on mobile) */}
+            <div className="hidden lg:flex items-center gap-4">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/20 rounded-full border border-green-200 dark:border-green-800">
+                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-xs font-medium text-green-700 dark:text-green-300">System Online</span>
               </div>
-              <div className="flex gap-2 mt-1 sm:mt-0">
-                <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} aria-label="Settings"><Settings className="h-5 w-5" /></Button>
-                <Button variant="ghost" size="icon" onClick={() => { navigate('/notifications'); markAsRead(); }} aria-label="Notifications" className="relative">
-                  <Bell className="h-5 w-5" />
-                  {unreadCount > 0 && (
-                    <Badge variant="destructive"
-                      className="absolute -top-1 -right-1 h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold animate-pulse"
-                    >{unreadCount > 99 ? '99+' : unreadCount}</Badge>
-                  )}
-                </Button>
-                <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="Logout"><LogOut className="h-5 w-5" /></Button>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded-full border border-blue-200 dark:border-blue-800">
+                <Bell className="h-3 w-3 text-blue-600" />
+                <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                  {notificationsEnabled ? 'Notifications On' : 'Notifications Off'}
+                </span>
               </div>
+            </div>
+
+            {/* Right: Actions + User Menu */}
+            <div className="flex items-center gap-2">
+              {/* Notifications Button */}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => { navigate('/notifications'); markAsRead(); }} 
+                className="relative hover:bg-accent/50 transition-colors"
+                aria-label="View notifications"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <Badge 
+                    variant="destructive"
+                    className="absolute -top-1 -right-1 h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold animate-bounce"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Badge>
+                )}
+              </Button>
+
+              {/* Mobile Menu Toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                aria-label="Toggle menu"
+              >
+                {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </Button>
+
+              {/* Desktop User Menu */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild className="hidden md:flex">
+                  <Button variant="ghost" className="flex items-center gap-2 px-3 py-2 h-auto hover:bg-accent/50 transition-colors">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src="/placeholder-avatar.png" alt="User" />
+                      <AvatarFallback className="bg-primary text-primary-foreground text-sm font-semibold">
+                        {displayName.split(' ').map(n => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="hidden lg:block text-left">
+                      <p className="text-sm font-medium leading-none">{displayName}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{userEmail}</p>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="flex items-center gap-2 p-2">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src="/placeholder-avatar.png" alt="User" />
+                      <AvatarFallback className="bg-primary text-primary-foreground text-sm">
+                        {displayName.split(' ').map(n => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">{displayName}</p>
+                      <p className="text-xs text-muted-foreground">{userEmail}</p>
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Settings</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/api-docs')} className="cursor-pointer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    <span>API Documentation</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive focus:text-destructive">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Sign Out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
-        </div>
+
+          {/* Mobile Menu */}
+          {mobileMenuOpen && (
+            <div className="md:hidden mt-4 pt-4 border-t border-border">
+              <div className="flex flex-col space-y-3">
+                {/* User Info */}
+                <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src="/placeholder-avatar.png" alt="User" />
+                    <AvatarFallback className="bg-primary text-primary-foreground">
+                      {displayName.split(' ').map(n => n[0]).join('')}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-medium text-sm">{displayName}</p>
+                    <p className="text-xs text-muted-foreground">{userEmail}</p>
+                  </div>
+                </div>
+
+                {/* Status Indicators */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-green-700 dark:text-green-300">System Online</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <Bell className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                      {notificationsEnabled ? 'Notifications Enabled' : 'Notifications Disabled'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Menu Items */}
+                <div className="flex flex-col space-y-1">
+                  <Button 
+                    variant="ghost" 
+                    className="justify-start h-auto py-3 px-3" 
+                    onClick={() => { navigate('/settings'); setMobileMenuOpen(false); }}
+                  >
+                    <Settings className="mr-3 h-4 w-4" />
+                    <span>Settings</span>
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="justify-start h-auto py-3 px-3" 
+                    onClick={() => { navigate('/api-docs'); setMobileMenuOpen(false); }}
+                  >
+                    <ExternalLink className="mr-3 h-4 w-4" />
+                    <span>API Documentation</span>
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="justify-start h-auto py-3 px-3 text-destructive hover:text-destructive hover:bg-destructive/10" 
+                    onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                  >
+                    <LogOut className="mr-3 h-4 w-4" />
+                    <span>Sign Out</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </header>
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
