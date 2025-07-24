@@ -40,119 +40,84 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     initializePushNotifications();
     loadRecentNotifications();
+    setupRealtimeSubscription();
+    setupApiNotificationListener();
 
-    // Set up real-time subscription for notifications
+    return () => {
+      // Cleanup will be handled by the channel unsubscribe
+    };
+  }, []);
+
+  const setupApiNotificationListener = () => {
+    // Listen for API notifications from the enhanced push service
+    const handleApiNotification = (event: CustomEvent) => {
+      const notificationData = event.detail;
+      
+      // Add to notifications list immediately
+      const newNotification: Notification = {
+        id: Date.now().toString(),
+        title: notificationData.title,
+        body: notificationData.body,
+        priority: notificationData.priority || 'medium',
+        acknowledged: false,
+        created_at: new Date().toISOString(),
+        type: 'api'
+      };
+
+      setNotifications(prev => [newNotification, ...prev.slice(0, 49)]);
+      setUnreadCount(prev => prev + 1);
+
+      // Show toast notification
+      toast({
+        title: `🔔 ${notificationData.title}`,
+        description: notificationData.body,
+        duration: 5000,
+      });
+    };
+
+    window.addEventListener('api-notification-received', handleApiNotification as EventListener);
+
+    return () => {
+      window.removeEventListener('api-notification-received', handleApiNotification as EventListener);
+    };
+  };
+
+  const setupRealtimeSubscription = () => {
+    // Set up real-time subscription for database notifications
     const channel = supabase
       .channel('notifications')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
         (payload) => {
-          // Avoid duplicate notifications
-          setNotifications(prev => [payload.new as Notification, ...prev.filter(n => n.id !== payload.new.id)].slice(0, 5));
-          setUnreadCount(prev => prev + 1);
-
-          if ('Notification' in window && Notification.permission === 'granted') {
-            showBrowserNotification(payload.new as Notification);
-          } else {
-            playNotificationSound((payload.new as Notification).priority || 'medium');
-            toast({
-              title: `🔔 ${(payload.new as Notification).title}`,
-              description: (payload.new as Notification).body,
-              duration: 5000,
-            });
-          }
+          console.log('Database notification received:', payload);
+          
+          const newNotification = payload.new as Notification;
+          
+          // Avoid duplicates by checking if notification already exists
+          setNotifications(prev => {
+            const exists = prev.some(n => n.id === newNotification.id);
+            if (!exists) {
+              setUnreadCount(prevCount => prevCount + 1);
+              
+              // Use the enhanced push service for immediate real-time display
+              pushService.showApiNotification(
+                newNotification.title,
+                newNotification.body,
+                newNotification.priority || 'medium'
+              );
+              
+              return [newNotification, ...prev.slice(0, 49)];
+            }
+            return prev;
+          });
         }
       )
       .subscribe();
 
     return () => {
-      // Clean up subscription; Supabase v2 uses .unsubscribe()
-      channel.unsubscribe && channel.unsubscribe();
+      channel.unsubscribe();
     };
-    // eslint-disable-next-line
-  }, []);
-
-  // Acknowledge all notifications when marking as read
-  const markAsRead = async () => {
-    if (unreadCount > 0) {
-      await acknowledgeAllNotifications();
-    }
-  };
-
-  const showDirectNotification = async (notification: Notification) => {
-    const browserNotification = new Notification(notification.title, {
-      body: notification.body,
-      icon: '/mcm-logo-192.png',
-      badge: '/mcm-logo-192.png',
-      tag: 'mcm-realtime',
-      requireInteraction: notification.priority === 'high',
-      silent: false,
-      vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
-      data: {
-        priority: notification.priority,
-        timestamp: Date.now()
-      }
-    });
-
-    browserNotification.onclick = () => {
-      window.focus();
-      browserNotification.close();
-    };
-
-    setTimeout(() => {
-      try {
-        browserNotification.close();
-      } catch (e) {}
-    }, notification.priority === 'high' ? 10000 : 5000);
-  };
-
-  const showBrowserNotification = async (notification: Notification) => {
-    try {
-      if (!('Notification' in window)) return;
-      if (Notification.permission !== 'granted') return;
-
-      await playNotificationSound(notification.priority || 'medium');
-      if ('serviceWorker' in navigator) {
-        try {
-          const registration = await navigator.serviceWorker.ready;
-          await registration.showNotification(notification.title, {
-            body: notification.body,
-            icon: '/mcm-logo-192.png',
-            badge: '/mcm-logo-192.png',
-            tag: 'mcm-realtime',
-            requireInteraction: notification.priority === 'high',
-            silent: false,
-            vibrate: notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200],
-            data: {
-              priority: notification.priority,
-              timestamp: Date.now(),
-              url: window.location.origin
-            },
-            actions: notification.priority === 'high' ? [
-              { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' }
-            ] : []
-          });
-        } catch (swError) {
-          await showDirectNotification(notification);
-        }
-      } else {
-        await showDirectNotification(notification);
-      }
-
-      toast({
-        title: `🔔 ${notification.title}`,
-        description: notification.body,
-        duration: 5000,
-      });
-
-    } catch (error) {
-      toast({
-        title: `🔔 ${notification.title}`,
-        description: notification.body,
-        duration: 5000,
-      });
-    }
   };
 
   const initializePushNotifications = async () => {
@@ -161,7 +126,8 @@ const Dashboard: React.FC = () => {
       if ('Notification' in window) {
         setNotificationsEnabled(Notification.permission === 'granted');
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to initialize push notifications:', error);
       setNotificationsEnabled(false);
     }
   };
@@ -185,6 +151,7 @@ const Dashboard: React.FC = () => {
       setNotifications(notificationsWithAck);
       setUnreadCount(notificationsWithAck.filter(n => !n.acknowledged).length);
     } catch (err) {
+      console.error('Error loading notifications:', err);
       setNotifications([]);
       setUnreadCount(0);
       toast({
@@ -218,113 +185,36 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        toast({
-          title: "Notifications Blocked",
-          description: "Please click 'Allow' in the browser dialog to enable notifications",
-          variant: "destructive",
-        });
-        return;
+      // Request permission if not already granted
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          toast({
+            title: "Notifications Blocked",
+            description: "Please click 'Allow' in the browser dialog to enable notifications",
+            variant: "destructive",
+          });
+          return;
+        }
+        setNotificationsEnabled(true);
       }
 
-      setNotificationsEnabled(true);
-
-      const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
-      const body = `Test notification (${priority} priority) - ${new Date().toLocaleTimeString()}`;
-
-      await playNotificationSound(priority);
-
-      if ('serviceWorker' in navigator) {
-        try {
-          const registration = await navigator.serviceWorker.ready;
-
-          await registration.showNotification(title, {
-            body,
-            icon: '/mcm-logo-192.png',
-            badge: '/mcm-logo-192.png',
-            tag: 'mcm-test',
-            requireInteraction: priority === 'high',
-            silent: false,
-            data: {
-              priority,
-              timestamp: Date.now(),
-              url: window.location.origin
-            },
-            actions: priority === 'high' ? [
-              { action: 'acknowledge', title: 'Acknowledge' }
-            ] : []
-          });
-        } catch (swError) {
-          const notification = new Notification(title, {
-            body,
-            icon: '/mcm-logo-192.png',
-            badge: '/mcm-logo-192.png',
-            tag: 'mcm-test',
-            requireInteraction: priority === 'high',
-            silent: false
-          });
-
-          notification.onclick = () => {
-            window.focus();
-            notification.close();
-          };
-
-          setTimeout(() => {
-            try {
-              notification.close();
-            } catch (e) {}
-          }, priority === 'high' ? 10000 : 5000);
-        }
-      } else {
-        const notification = new Notification(title, {
-          body,
-          icon: '/mcm-logo-192.png',
-          badge: '/mcm-logo-192.png',
-          tag: 'mcm-test',
-          requireInteraction: priority === 'high',
-          silent: false
-        });
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-
-        setTimeout(() => {
-          try {
-            notification.close();
-          } catch (e) {}
-        }, priority === 'high' ? 10000 : 5000);
-      }
-
-      try {
-        const response = await fetch('/api/notifications', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'test_notification',
-            title,
-            message: body,
-            priority
-          })
-        });
-
-        if (!response.ok) {
-          // Still show locally even if API fails
-        }
-      } catch {}
+      // Use the enhanced push service for test notifications
+      await pushService.sendTestNotification(priority);
 
       toast({
         title: "✅ Notification Sent!",
         description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully!`,
       });
 
-      loadRecentNotifications();
+      // Reload notifications to show the new test notification
+      await loadRecentNotifications();
+      
     } catch (error: any) {
+      console.error('Test notification error:', error);
       toast({
         title: "Notification Failed",
-        description: error?.message || "Please allow notifications when prompted by your browser",
+        description: error?.message || "Failed to send test notification",
         variant: "destructive",
       });
     } finally {
@@ -332,71 +222,17 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-
-      const soundConfig = {
-        low: { frequency: 400, duration: 0.3, volume: 0.1, pattern: [{ freq: 400, dur: 0.3 }] },
-        medium: { frequency: 600, duration: 0.5, volume: 0.2, pattern: [{ freq: 600, dur: 0.25 }, { freq: 600, dur: 0.25 }] },
-        high: { frequency: 800, duration: 1.0, volume: 0.3, pattern: [
-          { freq: 800, dur: 0.2 }, 
-          { freq: 1000, dur: 0.2 }, 
-          { freq: 800, dur: 0.2 }, 
-          { freq: 1000, dur: 0.2 }, 
-          { freq: 800, dur: 0.2 }
-        ]}
-      };
-
-      const config = soundConfig[priority];
-      const audioContext = new AudioContext();
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
-      }
-      let startTime = audioContext.currentTime;
-      for (const note of config.pattern) {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        oscillator.frequency.setValueAtTime(note.freq, startTime);
-        oscillator.type = priority === 'high' ? 'square' : 'sine';
-        gainNode.gain.setValueAtTime(config.volume, startTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + note.dur);
-        oscillator.start(startTime);
-        oscillator.stop(startTime + note.dur);
-        startTime += note.dur + 0.1;
-      }
-      setTimeout(() => {
-        try {
-          audioContext.close();
-        } catch (e) {}
-      }, (config.duration + 1) * 1000);
-
-    } catch {}
-  };
-
   const acknowledgeNotification = async (notificationId: string) => {
     try {
-      const response = await fetch('/api/notifications', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: notificationId,
-          acknowledged: true
-        })
-      });
+      // Update in database
+      const { error } = await supabase
+        .from('notifications')
+        .update({ acknowledged: true })
+        .eq('id', notificationId);
 
-      if (!response.ok) {
-        const { error } = await supabase
-          .from('notifications')
-          .update({ acknowledged: true })
-          .eq('id', notificationId);
+      if (error) throw error;
 
-        if (error) throw error;
-      }
-
+      // Update local state
       setNotifications(prev =>
         prev.map(n =>
           n.id === notificationId
@@ -410,7 +246,8 @@ const Dashboard: React.FC = () => {
         title: "✅ Notification Acknowledged",
         description: "Notification has been marked as read",
       });
-    } catch {
+    } catch (error) {
+      console.error('Error acknowledging notification:', error);
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge notification",
@@ -421,20 +258,12 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeAllNotifications = async () => {
     try {
-      const response = await fetch('/api/notifications', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acknowledgeAll: true })
-      });
+      const { error } = await supabase
+        .from('notifications')
+        .update({ acknowledged: true })
+        .eq('acknowledged', false);
 
-      if (!response.ok) {
-        const { error } = await supabase
-          .from('notifications')
-          .update({ acknowledged: true })
-          .eq('acknowledged', false);
-
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       setNotifications(prev =>
         prev.map(n => ({ ...n, acknowledged: true }))
@@ -445,12 +274,19 @@ const Dashboard: React.FC = () => {
         title: "✅ All Notifications Acknowledged",
         description: "All notifications have been marked as read",
       });
-    } catch {
+    } catch (error) {
+      console.error('Error acknowledging all notifications:', error);
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge all notifications",
         variant: "destructive",
       });
+    }
+  };
+
+  const markAsRead = async () => {
+    if (unreadCount > 0) {
+      await acknowledgeAllNotifications();
     }
   };
 
@@ -472,15 +308,6 @@ const Dashboard: React.FC = () => {
       description: "API URL copied to clipboard"
     });
   };
-
-  const examplePayload = `{
-  "type": "site_down",
-  "title": "Site Down Alert", 
-  "message": "example.com is not responding",
-  "site": "example.com",
-  "priority": "high",
-  "timestamp": "${new Date().toISOString()}"
-}`;
 
   // Prepare user display values (with fallback)
   const displayName = 'MCM User';
@@ -758,6 +585,7 @@ const Dashboard: React.FC = () => {
                       <SelectItem value="alert">Alert</SelectItem>
                       <SelectItem value="warning">Warning</SelectItem>
                       <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="api">API</SelectItem>
                       <SelectItem value="custom">Custom</SelectItem>
                     </SelectContent>
                   </Select>
