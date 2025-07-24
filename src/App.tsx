@@ -1,4 +1,4 @@
-// src/App.tsx
+// src/App.tsx - Enhanced with real-time notifications
 import React, { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,262 +8,307 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { pushService } from "@/services/pushNotificationService";
 import InAppNotificationSystem from "@/components/InAppNotificationSystem";
+import { createClient } from '@supabase/supabase-js';
 
 // Page Components
 import Index from "./pages/Index";
 import ApiDocumentation from "./pages/ApiDocumentation";
 import NotFound from "./pages/NotFound";
 import AllNotifications from "./pages/AllNotifications";
-import Dashboard from "./pages/Dashboard";
 
 const queryClient = new QueryClient();
 
+// Supabase client setup for real-time
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rswwlwybqsinzckzwcpb.supabase.co';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJzd3dsd3licXNpbnpja3p3Y3BiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMzY0MjcsImV4cCI6MjA2ODcxMjQyN30.OFDBSFnSWbage9xI5plqis7RAFKnJPuzO1JWUHE7yDM';
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Global notification state
+interface NotificationData {
+  id: string;
+  title: string;
+  body: string;
+  type?: string;
+  priority?: 'low' | 'medium' | 'high';
+  created_at: string;
+  acknowledged: boolean;
+  metadata?: any;
+}
+
 const App: React.FC = () => {
-  const [isServiceWorkerReady, setIsServiceWorkerReady] = useState(false);
+  const [isAudioInitialized, setIsAudioInitialized] = useState(false);
+  const [lastNotificationCheck, setLastNotificationCheck] = useState<Date>(new Date());
 
   useEffect(() => {
-    const initializePushService = async () => {
+    const initializeApp = async () => {
       try {
+        // Initialize push service
         await pushService.initialize();
         console.log("Push notification service initialized");
-        setIsServiceWorkerReady(true);
 
-        // Set up service worker message listeners for real-time notifications
-        setupServiceWorkerListeners();
-        
-        // Register for push subscription if supported
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
-          try {
-            await pushService.subscribe();
-            console.log("Push subscription established");
-          } catch (error) {
-            console.warn("Push subscription failed:", error);
+        // Initialize audio context on first user interaction
+        const initAudioContext = () => {
+          if (!isAudioInitialized) {
+            // Create a silent audio context to enable future audio
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+              audioContext.resume();
+            }
+            setIsAudioInitialized(true);
+            console.log("Audio context initialized");
+            
+            // Remove the event listeners after first interaction
+            document.removeEventListener('click', initAudioContext);
+            document.removeEventListener('touchstart', initAudioContext);
+            document.removeEventListener('keydown', initAudioContext);
           }
-        }
+        };
+
+        // Add event listeners for first user interaction
+        document.addEventListener('click', initAudioContext);
+        document.addEventListener('touchstart', initAudioContext);
+        document.addEventListener('keydown', initAudioContext);
+
+        // Set up real-time notification listener
+        setupRealtimeNotifications();
+        
+        // Set up service worker message listener
+        setupServiceWorkerListener();
+        
+        // Start polling as fallback
+        startNotificationPolling();
 
       } catch (error) {
-        console.error("Failed to initialize push notification service:", error);
-        setIsServiceWorkerReady(false);
+        console.error("Failed to initialize app:", error);
       }
     };
 
-    const setupServiceWorkerListeners = () => {
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.addEventListener('message', (event) => {
-          console.log('App received SW message:', event.data);
-          
-          switch (event.data?.type) {
-            case 'PUSH_NOTIFICATION_RECEIVED':
-              handlePushNotificationReceived(event.data);
-              break;
-              
-            case 'API_NOTIFICATION_SHOWN':
-              handleApiNotificationShown(event.data);
-              break;
-              
-            case 'NOTIFICATION_CLICKED':
-              handleNotificationClicked(event.data);
-              break;
-              
-            case 'NOTIFICATION_ACKNOWLEDGED':
-              handleNotificationAcknowledged(event.data);
-              break;
-              
-            case 'BACKGROUND_SYNC_COMPLETED':
-              handleBackgroundSyncCompleted(event.data);
-              break;
-              
-            default:
-              console.log('Unhandled SW message type:', event.data?.type);
-          }
-        });
-
-        // Listen for service worker updates
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('Service worker controller changed - reloading');
-          window.location.reload();
-        });
-      }
-    };
-
-    const handlePushNotificationReceived = (data: any) => {
-      console.log('Push notification received in app:', data);
-      
-      // Dispatch custom event for components to listen to
-      window.dispatchEvent(new CustomEvent('push-notification', {
-        detail: data.notificationData
-      }));
-
-      // Update UI indicators, refresh notification lists, etc.
-      // This can be handled by individual components listening to the custom event
-    };
-
-    const handleApiNotificationShown = (data: any) => {
-      console.log('API notification shown:', data);
-      
-      // Dispatch custom event for real-time API notifications
-      window.dispatchEvent(new CustomEvent('api-notification-received', {
-        detail: data.notificationData
-      }));
-    };
-
-    const handleNotificationClicked = (data: any) => {
-      console.log('Notification clicked in app:', data);
-      
-      // Handle navigation based on notification data
-      if (data.targetUrl && data.targetUrl !== window.location.pathname) {
-        window.history.pushState({}, '', data.targetUrl);
-      }
-      
-      // Focus the window
-      window.focus();
-    };
-
-    const handleNotificationAcknowledged = (data: any) => {
-      console.log('Notification acknowledged:', data);
-      
-      // Dispatch event to update UI
-      window.dispatchEvent(new CustomEvent('notification-acknowledged', {
-        detail: data
-      }));
-    };
-
-    const handleBackgroundSyncCompleted = (data: any) => {
-      console.log('Background sync completed:', data);
-      
-      // Refresh notification data
-      window.dispatchEvent(new CustomEvent('background-sync-completed', {
-        detail: data
-      }));
-    };
-
-    // Initialize the push service
-    initializePushService();
-
-    // Set up visibility change listener for better mobile behavior
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('App became visible - refreshing notifications');
-        
-        // Dispatch event to refresh notifications when app becomes visible
-        window.dispatchEvent(new CustomEvent('app-became-visible'));
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Set up online/offline listeners
-    const handleOnline = () => {
-      console.log('App came online');
-      window.dispatchEvent(new CustomEvent('app-online'));
-    };
-
-    const handleOffline = () => {
-      console.log('App went offline');
-      window.dispatchEvent(new CustomEvent('app-offline'));
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    initializeApp();
 
     // Cleanup
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Listen for unhandled promise rejections (helpful for debugging)
-  useEffect(() => {
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      
-      // Don't show notification-related errors to users as they might be expected
-      if (event.reason?.message?.includes('notification') || 
-          event.reason?.message?.includes('permission')) {
-        event.preventDefault();
+      if (window.notificationChannel) {
+        window.notificationChannel.unsubscribe();
+      }
+      if (window.notificationPollInterval) {
+        clearInterval(window.notificationPollInterval);
       }
     };
-
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    
-    return () => {
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
   }, []);
+
+  const setupRealtimeNotifications = () => {
+    try {
+      // Subscribe to real-time changes in notifications table
+      const channel = supabase
+        .channel('notifications-realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications'
+          },
+          (payload) => {
+            console.log('Real-time notification received:', payload);
+            handleNewNotification(payload.new as NotificationData);
+          }
+        )
+        .subscribe((status) => {
+          console.log('Supabase real-time subscription status:', status);
+        });
+
+      // Store channel reference for cleanup
+      (window as any).notificationChannel = channel;
+    } catch (error) {
+      console.error('Failed to setup real-time notifications:', error);
+    }
+  };
+
+  const setupServiceWorkerListener = () => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const { type, notificationData } = event.data;
+        
+        switch (type) {
+          case 'PUSH_NOTIFICATION_RECEIVED':
+            console.log('Push notification received via service worker:', notificationData);
+            handleNewNotification(notificationData);
+            break;
+            
+          case 'NOTIFICATION_CLICKED':
+            console.log('Notification clicked:', notificationData);
+            // Handle notification click - maybe navigate to specific page
+            break;
+            
+          case 'NOTIFICATION_ACKNOWLEDGED':
+            console.log('Notification acknowledged:', notificationData);
+            // Handle acknowledgment
+            break;
+            
+          default:
+            console.log('Unknown service worker message:', event.data);
+        }
+      });
+    }
+  };
+
+  const startNotificationPolling = () => {
+    // Poll for new notifications every 30 seconds as fallback
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch('/.netlify/functions/notifications');
+        const data = await response.json();
+        
+        if (data.success && data.notifications) {
+          // Check for new notifications since last check
+          const newNotifications = data.notifications.filter((notif: NotificationData) => 
+            new Date(notif.created_at) > lastNotificationCheck && !notif.acknowledged
+          );
+          
+          newNotifications.forEach((notif: NotificationData) => {
+            handleNewNotification(notif);
+          });
+          
+          if (newNotifications.length > 0) {
+            setLastNotificationCheck(new Date());
+          }
+        }
+      } catch (error) {
+        console.error('Polling failed:', error);
+      }
+    }, 30000); // 30 seconds
+
+    // Store interval reference for cleanup
+    (window as any).notificationPollInterval = pollInterval;
+  };
+
+  const handleNewNotification = async (notification: NotificationData) => {
+    console.log('Processing new notification:', notification);
+    
+    try {
+      // Play notification sound
+      await playNotificationSound(notification.priority || 'medium');
+      
+      // Show browser notification via service worker
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SHOW_NOTIFICATION',
+          title: notification.title,
+          body: notification.body,
+          priority: notification.priority || 'medium',
+          icon: '/mcm-logo-192.png',
+          badge: '/mcm-logo-192.png',
+          tag: `notification-${notification.id}`,
+          requireInteraction: notification.priority === 'high',
+          data: {
+            id: notification.id,
+            url: '/',
+            timestamp: Date.now()
+          }
+        });
+      }
+      
+      // Trigger custom event for in-app notifications
+      window.dispatchEvent(new CustomEvent('newNotification', {
+        detail: notification
+      }));
+      
+      // Show toast notification
+      if (notification.priority === 'high') {
+        Sonner.error(`🔴 ${notification.title}`, {
+          description: notification.body,
+          duration: 8000,
+        });
+      } else if (notification.priority === 'low') {
+        Sonner.info(`🔵 ${notification.title}`, {
+          description: notification.body,
+          duration: 4000,
+        });
+      } else {
+        Sonner.success(`🟢 ${notification.title}`, {
+          description: notification.body,
+          duration: 6000,
+        });
+      }
+
+      // Vibrate on mobile if supported
+      if (navigator.vibrate) {
+        const pattern = notification.priority === 'high' ? [300, 100, 300, 100, 300] : [200, 100, 200];
+        navigator.vibrate(pattern);
+      }
+
+    } catch (error) {
+      console.error('Error handling notification:', error);
+    }
+  };
+
+  const playNotificationSound = async (priority: 'low' | 'medium' | 'high' = 'medium') => {
+    try {
+      // Only play sound if audio is initialized (user has interacted)
+      if (!isAudioInitialized) {
+        console.log('Audio not initialized, skipping sound');
+        return;
+      }
+
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Different frequencies for different priorities
+      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
+      const duration = priority === 'high' ? 1.0 : 0.5;
+      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
+
+      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      oscillator.type = 'sine';
+
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration);
+
+      console.log(`Played ${priority} priority notification sound`);
+    } catch (error) {
+      console.error('Failed to play notification sound:', error);
+    }
+  };
 
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
           <Toaster />
-          <Sonner />
+          <Sonner 
+            position="top-right"
+            closeButton
+            richColors
+            expand={true}
+            visibleToasts={5}
+          />
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Index />} />
-              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/api-docs" element={<ApiDocumentation />} />
               <Route path="/notifications" element={<AllNotifications />} />
-              {/* Add other routes above this */}
               <Route path="*" element={<NotFound />} />
             </Routes>
 
-            {/* In-App Notification System - only render when SW is ready */}
-            {isServiceWorkerReady && <InAppNotificationSystem />}
-            
-            {/* Connection Status Indicator */}
-            <ConnectionStatusIndicator />
+            {/* In-App Notification System */}
+            <InAppNotificationSystem />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>
     </QueryClientProvider>
-  );
-};
-
-// Connection status indicator component
-const ConnectionStatusIndicator: React.FC = () => {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [showIndicator, setShowIndicator] = useState(false);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      setShowIndicator(true);
-      
-      // Hide indicator after 3 seconds
-      setTimeout(() => setShowIndicator(false), 3000);
-    };
-
-    const handleOffline = () => {
-      setIsOnline(false);
-      setShowIndicator(true);
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  if (!showIndicator) return null;
-
-  return (
-    <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg shadow-lg transition-all duration-300 ${
-      isOnline 
-        ? 'bg-green-500 text-white' 
-        : 'bg-red-500 text-white'
-    }`}>
-      <div className="flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-white animate-pulse' : 'bg-white'}`} />
-        <span className="text-sm font-medium">
-          {isOnline ? 'Back online' : 'No internet connection'}
-        </span>
-      </div>
-    </div>
   );
 };
 
