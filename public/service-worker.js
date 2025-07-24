@@ -1,21 +1,55 @@
 // MCM Alerts Service Worker with Enhanced Mobile Background Notifications
+// This service worker handles push notifications, caching, and background sync
 
-// Import necessary Workbox modules
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
-import { registerRoute } from 'workbox-routing';
-import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
-import { ExpirationPlugin } from 'workbox-expiration';
-
-// This is the array of URLs that vite-plugin-pwa will inject automatically.
-// DO NOT DEFINE `const urlsToCache = [...]` manually here anymore.
-// The `self.__WB_MANIFEST` placeholder is filled by `vite-plugin-pwa` during the build process.
-precacheAndRoute(self.__WB_MANIFEST);
-
-// Optional: Clean up old Workbox caches immediately on activation.
-// This helps ensure users get the latest version quickly.
-cleanupOutdatedCaches();
+const CACHE_NAME = 'mcm-alerts-v1';
+const NOTIFICATION_TAG_PREFIX = 'mcm-alert';
 
 console.log('Service Worker loaded successfully with mobile background notification support');
+
+// Handle installation
+self.addEventListener('install', event => {
+  console.log('Service Worker installing...');
+  
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      console.log('Cache opened');
+      return cache.addAll([
+        '/',
+        '/manifest.json',
+        '/mcm-logo-192.png',
+        '/mcm-logo-512.png'
+      ]);
+    }).catch(error => {
+      console.error('Cache installation failed:', error);
+    })
+  );
+  
+  // Force activation of new service worker
+  self.skipWaiting();
+});
+
+// Handle activation
+self.addEventListener('activate', event => {
+  console.log('Service Worker activating...');
+  
+  event.waitUntil(
+    Promise.all([
+      // Clean up old caches
+      caches.keys().then(cacheNames => {
+        return Promise.all(
+          cacheNames.map(cacheName => {
+            if (cacheName !== CACHE_NAME) {
+              console.log('Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      // Take control of all clients
+      self.clients.claim()
+    ])
+  );
+});
 
 // Enhanced push event for mobile background notifications
 self.addEventListener('push', event => {
@@ -26,7 +60,7 @@ self.addEventListener('push', event => {
     body: 'New alert received',
     icon: '/mcm-logo-192.png',
     badge: '/mcm-logo-192.png',
-    tag: 'mcm-alert',
+    tag: `${NOTIFICATION_TAG_PREFIX}-${Date.now()}`,
     requireInteraction: false,
     silent: false,
     vibrate: [200, 100, 200],
@@ -36,19 +70,24 @@ self.addEventListener('push', event => {
     ],
     data: {
       url: '/',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      priority: 'medium'
     }
   };
 
+  // Parse push data if available
   if (event.data) {
     try {
       const data = event.data.json();
+      console.log('Push data received:', data);
+      
       notificationData = {
         ...notificationData,
         ...data,
         data: { ...notificationData.data, ...data.data }
       };
 
+      // Adjust notification based on priority
       if (data.priority === 'high') {
         notificationData.requireInteraction = true;
         notificationData.vibrate = [300, 100, 300, 100, 300];
@@ -60,9 +99,7 @@ self.addEventListener('push', event => {
       } else if (data.priority === 'low') {
         notificationData.vibrate = [100];
         notificationData.silent = false;
-      } else {
-        notificationData.vibrate = [200, 100, 200];
-        notificationData.silent = false;
+        notificationData.requireInteraction = false;
       }
     } catch (e) {
       console.error('Could not parse push data:', e);
@@ -70,205 +107,430 @@ self.addEventListener('push', event => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(notificationData.title, {
-      body: notificationData.body,
-      icon: notificationData.icon,
-      badge: notificationData.badge,
-      tag: notificationData.tag,
-      requireInteraction: notificationData.requireInteraction,
-      silent: notificationData.silent,
-      vibrate: notificationData.vibrate,
-      actions: notificationData.actions,
-      data: notificationData.data
-    }).then(() => {
-      console.log('Background notification displayed successfully');
-
-      return self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
+    Promise.all([
+      // Show the notification
+      self.registration.showNotification(notificationData.title, {
+        body: notificationData.body,
+        icon: notificationData.icon,
+        badge: notificationData.badge,
+        tag: notificationData.tag,
+        requireInteraction: notificationData.requireInteraction,
+        silent: notificationData.silent,
+        vibrate: notificationData.vibrate,
+        actions: notificationData.actions,
+        data: notificationData.data,
+        timestamp: Date.now()
+      }),
+      
+      // Notify all open clients about the push notification
+      self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
+        console.log(`Notifying ${clients.length} clients about push notification`);
+        
         clients.forEach(client => {
-          client.postMessage({
-            type: 'PLAY_NOTIFICATION_SOUND',
-            priority: notificationData.data?.priority || 'medium'
-          });
+          try {
+            client.postMessage({
+              type: 'PUSH_NOTIFICATION_RECEIVED',
+              notificationData: notificationData,
+              timestamp: Date.now()
+            });
+          } catch (error) {
+            console.error('Failed to send message to client:', error);
+          }
         });
-      });
+      })
+    ]).then(() => {
+      console.log('Background notification displayed and clients notified successfully');
     }).catch(error => {
       console.error('Failed to show background notification:', error);
     })
   );
 });
 
-// Enhanced notification click handler - handles both dashboard notifications and test notifications
+// Enhanced notification click handler
 self.addEventListener('notificationclick', function(event) {
   console.log('Notification clicked:', event);
   
+  const notification = event.notification;
+  const action = event.action;
+  const data = notification.data || {};
+  
   // Close the notification
-  event.notification.close();
+  notification.close();
   
   // Handle different actions
-  if (event.action === 'acknowledge') {
+  if (action === 'acknowledge') {
     console.log('Notification acknowledged via service worker');
-    // Send message to main thread to handle acknowledgment
+    
     event.waitUntil(
-      clients.matchAll({ includeUncontrolled: true }).then(function(clientList) {
-        if (clientList.length > 0) {
-          // Send acknowledgment message to the first available client
-          clientList.forEach(client => {
+      self.clients.matchAll({ includeUncontrolled: true }).then(function(clientList) {
+        clientList.forEach(client => {
+          try {
             client.postMessage({
-              type: 'ACKNOWLEDGE_NOTIFICATION',
-              notificationData: event.notification.data,
-              notificationTag: event.notification.tag
+              type: 'NOTIFICATION_ACKNOWLEDGED',
+              notificationData: data,
+              notificationTag: notification.tag,
+              timestamp: Date.now()
             });
-          });
-        }
+          } catch (error) {
+            console.error('Failed to send acknowledgment message:', error);
+          }
+        });
       })
     );
-  } else if (event.action === 'view' || !event.action) {
-    // Default click action or explicit view action - focus or open the app
-    let targetUrl = '/';
-    if (event.notification.data && event.notification.data.url) {
-      targetUrl = event.notification.data.url;
-    }
-
+  } else if (action === 'dismiss') {
+    console.log('Notification dismissed');
+    
     event.waitUntil(
-      clients.matchAll({
+      self.clients.matchAll({ includeUncontrolled: true }).then(function(clientList) {
+        clientList.forEach(client => {
+          try {
+            client.postMessage({
+              type: 'NOTIFICATION_DISMISSED',
+              notificationData: data,
+              notificationTag: notification.tag,
+              timestamp: Date.now()
+            });
+          } catch (error) {
+            console.error('Failed to send dismissal message:', error);
+          }
+        });
+      })
+    );
+  } else {
+    // Default click action or explicit view action - focus or open the app
+    let targetUrl = data.url || '/';
+    
+    event.waitUntil(
+      self.clients.matchAll({
         type: 'window',
         includeUncontrolled: true
       }).then(function(clientList) {
-        // If there's already a window open, focus it
+        // Check if there's already a window open with the target URL
         for (let i = 0; i < clientList.length; i++) {
           const client = clientList[i];
-          if (client.url.includes(self.location.origin)) {
+          const clientUrl = new URL(client.url);
+          const targetUrlObj = new URL(targetUrl, self.location.origin);
+          
+          if (clientUrl.origin === targetUrlObj.origin) {
+            console.log('Focusing existing client window');
+            
+            // Send message to the client about the notification click
+            try {
+              client.postMessage({
+                type: 'NOTIFICATION_CLICKED',
+                notificationData: data,
+                notificationTag: notification.tag,
+                targetUrl: targetUrl,
+                timestamp: Date.now()
+              });
+            } catch (error) {
+              console.error('Failed to send click message:', error);
+            }
+            
             return client.focus();
           }
         }
         
         // If no window is open, open a new one
-        if (clients.openWindow) {
-          return clients.openWindow(targetUrl);
+        if (self.clients.openWindow) {
+          console.log('Opening new client window:', targetUrl);
+          return self.clients.openWindow(targetUrl);
         }
       }).catch(error => {
         console.error('Error handling notification click:', error);
       })
     );
-  } else if (event.action === 'dismiss') {
-    // Just close the notification (already done above)
-    console.log('Notification dismissed');
   }
 });
 
-// Enhanced message handling - supports both existing functionality and new dashboard features
+// Enhanced message handling from main thread
 self.addEventListener('message', event => {
   console.log('Service Worker received message:', event.data);
 
-  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const {
-        title,
-        body,
-        icon,
-        badge,
-        priority,
-        tag,
-        requireInteraction,
-        silent,
-        vibrate,
-        actions,
-        data
-    } = event.data;
-
-    // Set default actions based on priority
-    let defaultActions = [
-      { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
-      { action: 'dismiss', title: 'Dismiss' }
-    ];
-
-    if (priority === 'high') {
-      defaultActions = [
-        { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' },
-        { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }
-      ];
-    }
-
-    const notificationOptions = {
-      body,
-      icon: icon || '/mcm-logo-192.png',
-      badge: badge || '/mcm-logo-192.png',
-      tag: tag || 'mcm-alert',
-      silent: silent !== undefined ? silent : false,
-      requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'),
-      vibrate: vibrate || (priority === 'high' ? [300, 100, 300, 100, 300] : priority === 'low' ? [100] : [200, 100, 200]),
-      actions: actions || defaultActions,
-      data: {
-        url: self.location.origin,
-        priority: priority || 'medium',
-        timestamp: Date.now(),
-        ...(data || {})
-      }
-    };
-
-    self.registration.showNotification(title, notificationOptions)
-      .then(() => {
-        console.log('Manual notification displayed successfully');
-        if (event.ports && event.ports[0]) {
-          event.ports[0].postMessage({ success: true });
-        }
-      })
-      .catch(error => {
-        console.error('Failed to show manual notification:', error);
-        if (event.ports && event.ports[0]) {
-          event.ports[0].postMessage({ success: false, error: error.message });
-        }
-      });
-  }
+  const { data } = event;
   
-  // Handle skip waiting message
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+  if (!data || !data.type) {
+    console.warn('Received message without type:', data);
+    return;
+  }
+
+  switch (data.type) {
+    case 'SHOW_NOTIFICATION':
+      handleShowNotification(event);
+      break;
+      
+    case 'SKIP_WAITING':
+      console.log('Skipping waiting...');
+      self.skipWaiting();
+      break;
+      
+    case 'GET_SUBSCRIPTION':
+      handleGetSubscription(event);
+      break;
+      
+    case 'CLEAR_NOTIFICATIONS':
+      handleClearNotifications(event);
+      break;
+      
+    default:
+      console.warn('Unknown message type:', data.type);
   }
 });
+
+// Handle showing notifications from main thread
+function handleShowNotification(event) {
+  const {
+    title,
+    body,
+    icon,
+    badge,
+    priority,
+    tag,
+    requireInteraction,
+    silent,
+    vibrate,
+    actions,
+    data
+  } = event.data;
+
+  // Set default actions based on priority
+  let defaultActions = [
+    { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+    { action: 'dismiss', title: 'Dismiss' }
+  ];
+
+  if (priority === 'high') {
+    defaultActions = [
+      { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' },
+      { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }
+    ];
+  }
+
+  const notificationOptions = {
+    body: body || 'New notification from MCM Alerts',
+    icon: icon || '/mcm-logo-192.png',
+    badge: badge || '/mcm-logo-192.png',
+    tag: tag || `${NOTIFICATION_TAG_PREFIX}-${Date.now()}`,
+    silent: silent !== undefined ? silent : false,
+    requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'),
+    vibrate: vibrate || getVibratePattern(priority),
+    actions: actions || defaultActions,
+    data: {
+      url: self.location.origin,
+      priority: priority || 'medium',
+      timestamp: Date.now(),
+      ...(data || {})
+    },
+    timestamp: Date.now()
+  };
+
+  console.log('Showing manual notification with options:', notificationOptions);
+
+  self.registration.showNotification(title || 'MCM Alert', notificationOptions)
+    .then(() => {
+      console.log('Manual notification displayed successfully');
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: true, timestamp: Date.now() });
+      }
+    })
+    .catch(error => {
+      console.error('Failed to show manual notification:', error);
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ 
+          success: false, 
+          error: error.message,
+          timestamp: Date.now() 
+        });
+      }
+    });
+}
+
+// Handle getting current subscription
+function handleGetSubscription(event) {
+  self.registration.pushManager.getSubscription()
+    .then(subscription => {
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ 
+          subscription: subscription ? {
+            endpoint: subscription.endpoint,
+            keys: {
+              p256dh: arrayBufferToBase64(subscription.getKey('p256dh')),
+              auth: arrayBufferToBase64(subscription.getKey('auth'))
+            }
+          } : null
+        });
+      }
+    })
+    .catch(error => {
+      console.error('Failed to get subscription:', error);
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ error: error.message });
+      }
+    });
+}
+
+// Handle clearing all notifications
+function handleClearNotifications(event) {
+  self.registration.getNotifications()
+    .then(notifications => {
+      console.log(`Clearing ${notifications.length} notifications`);
+      
+      notifications.forEach(notification => {
+        if (notification.tag && notification.tag.startsWith(NOTIFICATION_TAG_PREFIX)) {
+          notification.close();
+        }
+      });
+      
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ 
+          success: true, 
+          cleared: notifications.length 
+        });
+      }
+    })
+    .catch(error => {
+      console.error('Failed to clear notifications:', error);
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: false, error: error.message });
+      }
+    });
+}
+
+// Helper function to get vibrate pattern based on priority
+function getVibratePattern(priority) {
+  switch (priority) {
+    case 'high':
+      return [300, 100, 300, 100, 300];
+    case 'low':
+      return [100];
+    case 'medium':
+    default:
+      return [200, 100, 200];
+  }
+}
+
+// Helper function to convert ArrayBuffer to base64
+function arrayBufferToBase64(buffer) {
+  if (!buffer) return '';
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 // Handle notification close
 self.addEventListener('notificationclose', function(event) {
-  console.log('Notification closed:', event.notification.data);
+  console.log('Notification closed:', event.notification.tag);
   
-  // Optional: Send message to main thread about notification close
+  const notification = event.notification;
+  const data = notification.data || {};
+  
+  // Notify clients about notification close
   self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
     clients.forEach(client => {
-      client.postMessage({
-        type: 'NOTIFICATION_CLOSED',
-        notificationData: event.notification.data,
-        notificationTag: event.notification.tag
-      });
+      try {
+        client.postMessage({
+          type: 'NOTIFICATION_CLOSED',
+          notificationData: data,
+          notificationTag: notification.tag,
+          timestamp: Date.now()
+        });
+      } catch (error) {
+        console.error('Failed to send close message:', error);
+      }
     });
   });
-
-  // Optional: Track notification close events for analytics
-  // You could send analytics or update notification status here
 });
 
-// Add optional runtime caching for API calls (if needed)
-registerRoute(
-  ({ request }) => request.url.includes('/api/'),
-  new NetworkFirst({
-    cacheName: 'api-cache',
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 50,
-        maxAgeSeconds: 5 * 60, // 5 minutes
-      }),
-    ],
-  })
-);
+// Handle fetch events for caching (basic caching strategy)
+self.addEventListener('fetch', event => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') {
+    return;
+  }
 
-// Cache images with CacheFirst strategy
-registerRoute(
-  ({ request }) => request.destination === 'image',
-  new CacheFirst({
-    cacheName: 'images-cache',
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 100,
-        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
-      }),
-    ],
-  })
-);
+  // Skip non-http(s) requests
+  if (!event.request.url.startsWith('http')) {
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then(response => {
+      // Return cached version if available
+      if (response) {
+        console.log('Serving from cache:', event.request.url);
+        return response;
+      }
+
+      // Otherwise fetch from network
+      return fetch(event.request).then(response => {
+        // Don't cache non-successful responses
+        if (!response || response.status !== 200) {
+          return response;
+        }
+
+        // Clone the response as it can only be consumed once
+        const responseToCache = response.clone();
+
+        // Cache static assets
+        if (event.request.url.includes('.js') || 
+            event.request.url.includes('.css') || 
+            event.request.url.includes('.png') || 
+            event.request.url.includes('.jpg') || 
+            event.request.url.includes('.gif') ||
+            event.request.url.includes('.svg')) {
+          
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+
+        return response;
+      });
+    }).catch(error => {
+      console.error('Fetch failed:', error);
+      throw error;
+    })
+  );
+});
+
+// Handle background sync (if supported)
+if ('sync' in self.registration) {
+  self.addEventListener('sync', event => {
+    console.log('Background sync event:', event.tag);
+    
+    if (event.tag === 'background-notification-sync') {
+      event.waitUntil(
+        // Perform background sync tasks here
+        fetch('/api/notifications/sync')
+          .then(response => response.json())
+          .then(data => {
+            console.log('Background sync completed:', data);
+            
+            // Show any new notifications
+            if (data.notifications && data.notifications.length > 0) {
+              return Promise.all(
+                data.notifications.map(notification => 
+                  self.registration.showNotification(notification.title, {
+                    body: notification.body,
+                    icon: '/mcm-logo-192.png',
+                    badge: '/mcm-logo-192.png',
+                    tag: `${NOTIFICATION_TAG_PREFIX}-sync-${Date.now()}`,
+                    data: notification.data || {},
+                    timestamp: Date.now()
+                  })
+                )
+              );
+            }
+          })
+          .catch(error => {
+            console.error('Background sync failed:', error);
+          })
+      );
+    }
+  });
+}
+
+console.log('Service Worker setup complete');
