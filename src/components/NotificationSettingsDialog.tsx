@@ -595,14 +595,4 @@ const NotificationDemo: React.FC = () => {
   );
 };
 
-// Main export with provider wrapper
-const NotificationApp: React.FC = () => {
-  return (
-    <NotificationProvider>
-      <NotificationDemo />
-    </NotificationProvider>
-  );
-};
-
-export default NotificationApp;
 export { NotificationSettingsDialog };
