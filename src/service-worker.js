@@ -1,61 +1,64 @@
-// MCM Alerts Service Worker with Enhanced Mobile Background Notifications
+// Enhanced MCM Alerts Service Worker with Real-time API Notification Support
+// This service worker handles push notifications, caching, and background sync
 
-const CACHE_NAME = 'mcm-alerts-v3';
+const CACHE_NAME = 'mcm-alerts-v2';
 const NOTIFICATION_TAG_PREFIX = 'mcm-alert';
-const urlsToCache = [
-  '/',
-  '/manifest.json',
-  '/mcm-logo-192.png',
-  '/mcm-logo-512.png'
-];
+const API_CACHE_NAME = 'mcm-api-cache';
 
-// Install event - cache resources
+console.log('Enhanced Service Worker loaded with real-time API notification support');
+
+// Handle installation
 self.addEventListener('install', event => {
   console.log('Service Worker installing...');
+  
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+    Promise.all([
+      caches.open(CACHE_NAME).then(cache => {
+        console.log('Main cache opened');
+        return cache.addAll([
+          '/',
+          '/manifest.json',
+          '/mcm-logo-192.png',
+          '/mcm-logo-512.png'
+        ]);
+      }),
+      caches.open(API_CACHE_NAME).then(cache => {
+        console.log('API cache opened');
+        return Promise.resolve();
       })
-      .catch(error => {
-        console.error('Cache installation failed:', error);
-      })
+    ]).catch(error => {
+      console.error('Cache installation failed:', error);
+    })
   );
+  
+  // Force activation of new service worker
   self.skipWaiting();
 });
 
-// Activate event - cleanup old caches and take control immediately
+// Handle activation
 self.addEventListener('activate', event => {
   console.log('Service Worker activating...');
+  
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.map(key => {
-        if (key !== CACHE_NAME) {
-          console.log('Deleting old cache:', key);
-          return caches.delete(key);
-        }
-      }))
-    )
-  );
-  self.clients.claim();
-});
-
-// Fetch event - serve cached resources, fallback to network
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        return response || fetch(event.request);
-      })
-      .catch(error => {
-        console.error('Fetch failed:', error);
-        throw error;
-      })
+    Promise.all([
+      // Clean up old caches
+      caches.keys().then(cacheNames => {
+        return Promise.all(
+          cacheNames.map(cacheName => {
+            if (cacheName !== CACHE_NAME && cacheName !== API_CACHE_NAME) {
+              console.log('Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      // Take control of all clients
+      self.clients.claim()
+    ])
   );
 });
 
-// Enhanced push event for mobile background notifications
+// Enhanced push event for real-time API notifications
 self.addEventListener('push', event => {
   console.log('Push event received:', event);
 
@@ -75,7 +78,8 @@ self.addEventListener('push', event => {
     data: {
       url: '/',
       timestamp: Date.now(),
-      priority: 'medium'
+      priority: 'medium',
+      source: 'api'
     }
   };
 
@@ -95,12 +99,14 @@ self.addEventListener('push', event => {
       if (data.priority === 'high') {
         notificationData.requireInteraction = true;
         notificationData.vibrate = [300, 100, 300, 100, 300];
+        notificationData.silent = false;
         notificationData.actions = [
           { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' },
           { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }
         ];
       } else if (data.priority === 'low') {
         notificationData.vibrate = [100];
+        notificationData.silent = false;
         notificationData.requireInteraction = false;
       }
     } catch (e) {
@@ -110,7 +116,7 @@ self.addEventListener('push', event => {
 
   event.waitUntil(
     Promise.all([
-      // Show the notification
+      // Show the notification with enhanced mobile support
       self.registration.showNotification(notificationData.title, {
         body: notificationData.body,
         icon: notificationData.icon,
@@ -121,34 +127,30 @@ self.addEventListener('push', event => {
         vibrate: notificationData.vibrate,
         actions: notificationData.actions,
         data: notificationData.data,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        // Additional options for better mobile support
+        renotify: true,
+        sticky: notificationData.data.priority === 'high'
       }),
       
-      // Notify all open clients about the push notification
-      self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
-        console.log(`Notifying ${clients.length} clients about push notification`);
-        
-        clients.forEach(client => {
-          try {
-            client.postMessage({
-              type: 'PUSH_NOTIFICATION_RECEIVED',
-              notificationData: notificationData,
-              timestamp: Date.now()
-            });
-          } catch (error) {
-            console.error('Failed to send message to client:', error);
-          }
-        });
-      })
+      // Immediately notify all open clients about the push notification
+      notifyAllClients({
+        type: 'PUSH_NOTIFICATION_RECEIVED',
+        notificationData: notificationData,
+        timestamp: Date.now()
+      }),
+
+      // Store notification for offline access
+      storeNotificationOffline(notificationData)
     ]).then(() => {
-      console.log('Background notification displayed and clients notified successfully');
+      console.log('API push notification displayed and clients notified successfully');
     }).catch(error => {
-      console.error('Failed to show background notification:', error);
+      console.error('Failed to show API push notification:', error);
     })
   );
 });
 
-// Enhanced notification click handler
+// Enhanced notification click handler with better mobile support
 self.addEventListener('notificationclick', function(event) {
   console.log('Notification clicked:', event);
   
@@ -164,81 +166,35 @@ self.addEventListener('notificationclick', function(event) {
     console.log('Notification acknowledged via service worker');
     
     event.waitUntil(
-      self.clients.matchAll({ includeUncontrolled: true }).then(function(clientList) {
-        clientList.forEach(client => {
-          try {
-            client.postMessage({
-              type: 'NOTIFICATION_ACKNOWLEDGED',
-              notificationData: data,
-              notificationTag: notification.tag,
-              timestamp: Date.now()
-            });
-          } catch (error) {
-            console.error('Failed to send acknowledgment message:', error);
-          }
-        });
+      notifyAllClients({
+        type: 'NOTIFICATION_ACKNOWLEDGED',
+        notificationData: data,
+        notificationTag: notification.tag,
+        timestamp: Date.now()
       })
     );
   } else if (action === 'dismiss') {
     console.log('Notification dismissed');
     
     event.waitUntil(
-      self.clients.matchAll({ includeUncontrolled: true }).then(function(clientList) {
-        clientList.forEach(client => {
-          try {
-            client.postMessage({
-              type: 'NOTIFICATION_DISMISSED',
-              notificationData: data,
-              notificationTag: notification.tag,
-              timestamp: Date.now()
-            });
-          } catch (error) {
-            console.error('Failed to send dismissal message:', error);
-          }
-        });
+      notifyAllClients({
+        type: 'NOTIFICATION_DISMISSED',
+        notificationData: data,
+        notificationTag: notification.tag,
+        timestamp: Date.now()
       })
     );
   } else {
-    // Default click action - focus or open the app
+    // Default click action or explicit view action - focus or open the app
     let targetUrl = data.url || '/';
     
     event.waitUntil(
-      self.clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true
-      }).then(function(clientList) {
-        // Check if there's already a window open
-        for (let i = 0; i < clientList.length; i++) {
-          const client = clientList[i];
-          const clientUrl = new URL(client.url);
-          const targetUrlObj = new URL(targetUrl, self.location.origin);
-          
-          if (clientUrl.origin === targetUrlObj.origin) {
-            console.log('Focusing existing client window');
-            
-            try {
-              client.postMessage({
-                type: 'NOTIFICATION_CLICKED',
-                notificationData: data,
-                notificationTag: notification.tag,
-                targetUrl: targetUrl,
-                timestamp: Date.now()
-              });
-            } catch (error) {
-              console.error('Failed to send click message:', error);
-            }
-            
-            return client.focus();
-          }
-        }
-        
-        // If no window is open, open a new one
-        if (self.clients.openWindow) {
-          console.log('Opening new client window:', targetUrl);
-          return self.clients.openWindow(targetUrl);
-        }
-      }).catch(error => {
-        console.error('Error handling notification click:', error);
+      focusOrOpenClient(targetUrl, {
+        type: 'NOTIFICATION_CLICKED',
+        notificationData: data,
+        notificationTag: notification.tag,
+        targetUrl: targetUrl,
+        timestamp: Date.now()
       })
     );
   }
@@ -272,11 +228,69 @@ self.addEventListener('message', event => {
     case 'CLEAR_NOTIFICATIONS':
       handleClearNotifications(event);
       break;
+
+    case 'API_NOTIFICATION':
+      handleApiNotification(event);
+      break;
       
     default:
       console.warn('Unknown message type:', data.type);
   }
 });
+
+// Handle API notifications from main thread
+function handleApiNotification(event) {
+  const { title, body, priority, data } = event.data;
+
+  const notificationOptions = {
+    body: body || 'New API notification from MCM Alerts',
+    icon: '/mcm-logo-192.png',
+    badge: '/mcm-logo-192.png',
+    tag: `${NOTIFICATION_TAG_PREFIX}-api-${Date.now()}`,
+    silent: false,
+    requireInteraction: priority === 'high',
+    vibrate: getVibratePattern(priority || 'medium'),
+    actions: getActionsForPriority(priority || 'medium'),
+    data: {
+      url: self.location.origin,
+      priority: priority || 'medium',
+      timestamp: Date.now(),
+      source: 'api',
+      ...(data || {})
+    },
+    timestamp: Date.now(),
+    renotify: true,
+    sticky: priority === 'high'
+  };
+
+  console.log('Showing API notification with options:', notificationOptions);
+
+  self.registration.showNotification(title || 'MCM API Alert', notificationOptions)
+    .then(() => {
+      console.log('API notification displayed successfully');
+      
+      // Notify all clients immediately
+      notifyAllClients({
+        type: 'API_NOTIFICATION_SHOWN',
+        notificationData: { title, body, priority, ...notificationOptions.data },
+        timestamp: Date.now()
+      });
+
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ success: true, timestamp: Date.now() });
+      }
+    })
+    .catch(error => {
+      console.error('Failed to show API notification:', error);
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ 
+          success: false, 
+          error: error.message,
+          timestamp: Date.now() 
+        });
+      }
+    });
+}
 
 // Handle showing notifications from main thread
 function handleShowNotification(event) {
@@ -294,19 +308,6 @@ function handleShowNotification(event) {
     data
   } = event.data;
 
-  // Set default actions based on priority
-  let defaultActions = [
-    { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
-    { action: 'dismiss', title: 'Dismiss' }
-  ];
-
-  if (priority === 'high') {
-    defaultActions = [
-      { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' },
-      { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }
-    ];
-  }
-
   const notificationOptions = {
     body: body || 'New notification from MCM Alerts',
     icon: icon || '/mcm-logo-192.png',
@@ -314,15 +315,17 @@ function handleShowNotification(event) {
     tag: tag || `${NOTIFICATION_TAG_PREFIX}-${Date.now()}`,
     silent: silent !== undefined ? silent : false,
     requireInteraction: requireInteraction !== undefined ? requireInteraction : (priority === 'high'),
-    vibrate: vibrate || getVibratePattern(priority),
-    actions: actions || defaultActions,
+    vibrate: vibrate || getVibratePattern(priority || 'medium'),
+    actions: actions || getActionsForPriority(priority || 'medium'),
     data: {
       url: self.location.origin,
       priority: priority || 'medium',
       timestamp: Date.now(),
       ...(data || {})
     },
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    renotify: true,
+    sticky: priority === 'high'
   };
 
   console.log('Showing manual notification with options:', notificationOptions);
@@ -397,6 +400,70 @@ function handleClearNotifications(event) {
     });
 }
 
+// Helper function to notify all clients
+function notifyAllClients(message) {
+  return self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
+    console.log(`Notifying ${clients.length} clients:`, message);
+    
+    clients.forEach(client => {
+      try {
+        client.postMessage(message);
+      } catch (error) {
+        console.error('Failed to send message to client:', error);
+      }
+    });
+  });
+}
+
+// Helper function to focus existing client or open new one
+function focusOrOpenClient(targetUrl, message) {
+  return self.clients.matchAll({
+    type: 'window',
+    includeUncontrolled: true
+  }).then(function(clientList) {
+    // Check if there's already a window open with the target URL
+    for (let i = 0; i < clientList.length; i++) {
+      const client = clientList[i];
+      const clientUrl = new URL(client.url);
+      const targetUrlObj = new URL(targetUrl, self.location.origin);
+      
+      if (clientUrl.origin === targetUrlObj.origin) {
+        console.log('Focusing existing client window');
+        
+        // Send message to the client about the notification click
+        try {
+          client.postMessage(message);
+        } catch (error) {
+          console.error('Failed to send click message:', error);
+        }
+        
+        return client.focus();
+      }
+    }
+    
+    // If no window is open, open a new one
+    if (self.clients.openWindow) {
+      console.log('Opening new client window:', targetUrl);
+      return self.clients.openWindow(targetUrl);
+    }
+  }).catch(error => {
+    console.error('Error handling notification click:', error);
+  });
+}
+
+// Helper function to store notifications offline
+function storeNotificationOffline(notificationData) {
+  return caches.open(API_CACHE_NAME).then(cache => {
+    const notificationKey = `notification-${Date.now()}`;
+    const response = new Response(JSON.stringify(notificationData), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return cache.put(notificationKey, response);
+  }).catch(error => {
+    console.error('Failed to store notification offline:', error);
+  });
+}
+
 // Helper function to get vibrate pattern based on priority
 function getVibratePattern(priority) {
   switch (priority) {
@@ -407,6 +474,21 @@ function getVibratePattern(priority) {
     case 'medium':
     default:
       return [200, 100, 200];
+  }
+}
+
+// Helper function to get actions based on priority
+function getActionsForPriority(priority) {
+  if (priority === 'high') {
+    return [
+      { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' },
+      { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' }
+    ];
+  } else {
+    return [
+      { action: 'view', title: 'View Dashboard', icon: '/mcm-logo-192.png' },
+      { action: 'dismiss', title: 'Dismiss' }
+    ];
   }
 }
 
@@ -429,20 +511,193 @@ self.addEventListener('notificationclose', function(event) {
   const data = notification.data || {};
   
   // Notify clients about notification close
-  self.clients.matchAll({ includeUncontrolled: true }).then(clients => {
-    clients.forEach(client => {
-      try {
-        client.postMessage({
-          type: 'NOTIFICATION_CLOSED',
-          notificationData: data,
-          notificationTag: notification.tag,
-          timestamp: Date.now()
-        });
-      } catch (error) {
-        console.error('Failed to send close message:', error);
-      }
-    });
+  notifyAllClients({
+    type: 'NOTIFICATION_CLOSED',
+    notificationData: data,
+    notificationTag: notification.tag,
+    timestamp: Date.now()
   });
 });
 
-console.log('MCM Service Worker setup complete');
+// Enhanced fetch events for better caching and API interception
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  
+  // Handle API notification requests
+  if (url.pathname === '/api/notifications' && event.request.method === 'POST') {
+    event.respondWith(handleApiNotificationRequest(event.request));
+    return;
+  }
+
+  // Only handle GET requests for caching
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Skip non-http(s) requests
+  if (!event.request.url.startsWith('http')) {
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then(response => {
+      // Return cached version if available
+      if (response) {
+        console.log('Serving from cache:', event.request.url);
+        return response;
+      }
+
+      // Otherwise fetch from network
+      return fetch(event.request).then(response => {
+        // Don't cache non-successful responses
+        if (!response || response.status !== 200) {
+          return response;
+        }
+
+        // Clone the response as it can only be consumed once
+        const responseToCache = response.clone();
+
+        // Cache static assets
+        if (event.request.url.includes('.js') || 
+            event.request.url.includes('.css') || 
+            event.request.url.includes('.png') || 
+            event.request.url.includes('.jpg') || 
+            event.request.url.includes('.gif') ||
+            event.request.url.includes('.svg')) {
+          
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+
+        return response;
+      });
+    }).catch(error => {
+      console.error('Fetch failed:', error);
+      throw error;
+    })
+  );
+});
+
+// Handle API notification requests for real-time processing
+async function handleApiNotificationRequest(request) {
+  try {
+    // Clone the request to read the body
+    const requestClone = request.clone();
+    const body = await requestClone.json();
+    
+    console.log('API notification request intercepted:', body);
+
+    // Show notification immediately for real-time experience
+    if (body.title && body.message) {
+      const notificationData = {
+        title: body.title,
+        body: body.message || body.body,
+        priority: body.priority || 'medium',
+        data: {
+          type: body.type || 'api',
+          timestamp: Date.now(),
+          source: 'api'
+        }
+      };
+
+      // Show notification via service worker
+      await self.registration.showNotification(notificationData.title, {
+        body: notificationData.body,
+        icon: '/mcm-logo-192.png',
+        badge: '/mcm-logo-192.png',
+        tag: `${NOTIFICATION_TAG_PREFIX}-api-${Date.now()}`,
+        requireInteraction: notificationData.priority === 'high',
+        silent: false,
+        vibrate: getVibratePattern(notificationData.priority),
+        actions: getActionsForPriority(notificationData.priority),
+        data: notificationData.data,
+        timestamp: Date.now(),
+        renotify: true,
+        sticky: notificationData.priority === 'high'
+      });
+
+      // Notify all clients immediately
+      await notifyAllClients({
+        type: 'PUSH_NOTIFICATION_RECEIVED',
+        notificationData: notificationData,
+        timestamp: Date.now()
+      });
+
+      console.log('Real-time API notification shown successfully');
+    }
+
+    // Forward the request to the actual API
+    const response = await fetch(request);
+    return response;
+
+  } catch (error) {
+    console.error('Error handling API notification request:', error);
+    
+    // Return a fallback response
+    return new Response(JSON.stringify({ 
+      success: false, 
+      error: 'Service worker processing failed',
+      timestamp: Date.now()
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+// Handle background sync (if supported)
+if ('sync' in self.registration) {
+  self.addEventListener('sync', event => {
+    console.log('Background sync event:', event.tag);
+    
+    if (event.tag === 'background-notification-sync') {
+      event.waitUntil(
+        handleBackgroundSync()
+      );
+    }
+  });
+}
+
+// Handle background sync for offline notifications
+async function handleBackgroundSync() {
+  try {
+    console.log('Performing background notification sync');
+    
+    // Fetch any pending notifications
+    const response = await fetch('/api/notifications/sync');
+    
+    if (!response.ok) {
+      throw new Error(`Sync failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('Background sync completed:', data);
+    
+    // Show any new notifications
+    if (data.notifications && data.notifications.length > 0) {
+      for (const notification of data.notifications) {
+        await self.registration.showNotification(notification.title, {
+          body: notification.body,
+          icon: '/mcm-logo-192.png',
+          badge: '/mcm-logo-192.png',
+          tag: `${NOTIFICATION_TAG_PREFIX}-sync-${Date.now()}`,
+          data: notification.data || {},
+          timestamp: Date.now()
+        });
+      }
+      
+      // Notify clients about synced notifications
+      await notifyAllClients({
+        type: 'BACKGROUND_SYNC_COMPLETED',
+        notifications: data.notifications,
+        timestamp: Date.now()
+      });
+    }
+    
+  } catch (error) {
+    console.error('Background sync failed:', error);
+  }
+}
+
+console.log('Enhanced Service Worker setup complete with real-time API notification support');
