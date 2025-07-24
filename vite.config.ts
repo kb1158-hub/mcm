@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => ({
       registerType: 'autoUpdate',
       strategies: 'injectManifest',
       injectManifest: {
-        swSrc: 'public/service-worker.js', // Your actual SW
+        swSrc: 'src/service-worker.js', // Your actual SW
         
       },
       workbox: {
