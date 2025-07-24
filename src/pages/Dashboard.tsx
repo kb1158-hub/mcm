@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import Header from '@/components/Header';
 import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
 import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell } from 'lucide-react';
@@ -24,7 +23,7 @@ interface Notification {
 }
 
 const Dashboard: React.FC = () => {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { toast } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -38,26 +37,22 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     initializePushNotifications();
     loadRecentNotifications();
-    
+
     // Set up real-time subscription for notifications
-    const subscription = supabase
+    const channel = supabase
       .channel('notifications')
-      .on('postgres_changes', 
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
         (payload) => {
-          console.log('New notification received:', payload.new);
-          // Add new notification to the list
-          setNotifications(prev => [payload.new as Notification, ...prev.slice(0, 4)]);
-          // Increment unread count
+          // Avoid duplicate notifications
+          setNotifications(prev => [payload.new as Notification, ...prev.filter(n => n.id !== payload.new.id)].slice(0, 5));
           setUnreadCount(prev => prev + 1);
-          
-          // Show browser notification if enabled and play sound
+
           if ('Notification' in window && Notification.permission === 'granted') {
             showBrowserNotification(payload.new as Notification);
           } else {
-            // Even if browser notifications are disabled, play sound for API notifications
             playNotificationSound((payload.new as Notification).priority || 'medium');
-            // Show toast notification as fallback
             toast({
               title: `🔔 ${(payload.new as Notification).title}`,
               description: (payload.new as Notification).body,
@@ -69,16 +64,19 @@ const Dashboard: React.FC = () => {
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      // Clean up subscription; Supabase v2 uses .unsubscribe()
+      channel.unsubscribe && channel.unsubscribe();
     };
+    // eslint-disable-next-line
   }, []);
 
-  // Mark notifications as read when viewing them
-  const markAsRead = () => {
-    setUnreadCount(0);
+  // Acknowledge all notifications when marking as read
+  const markAsRead = async () => {
+    if (unreadCount > 0) {
+      await acknowledgeAllNotifications();
+    }
   };
 
-  // Helper function for direct notifications (when no service worker or as fallback)
   const showDirectNotification = async (notification: Notification) => {
     const browserNotification = new Notification(notification.title, {
       body: notification.body,
@@ -94,46 +92,27 @@ const Dashboard: React.FC = () => {
       }
     });
 
-    // Handle notification click
     browserNotification.onclick = () => {
       window.focus();
       browserNotification.close();
     };
 
-    // Auto-close after delay
     setTimeout(() => {
       try {
         browserNotification.close();
-      } catch (e) {
-        // Notification might already be closed
-        console.warn('Could not close notification:', e);
-      }
+      } catch (e) {}
     }, notification.priority === 'high' ? 10000 : 5000);
   };
 
   const showBrowserNotification = async (notification: Notification) => {
     try {
-      // Check if notifications are supported
-      if (!('Notification' in window)) {
-        console.warn('Browser does not support notifications');
-        return;
-      }
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
 
-      // Check permission
-      if (Notification.permission !== 'granted') {
-        console.warn('Notification permission not granted');
-        return;
-      }
-
-      // Play sound first
       await playNotificationSound(notification.priority || 'medium');
-      
-      // Check if service worker is available and use it preferentially
       if ('serviceWorker' in navigator) {
         try {
           const registration = await navigator.serviceWorker.ready;
-          
-          // Use service worker notification
           await registration.showNotification(notification.title, {
             body: notification.body,
             icon: '/mcm-logo-192.png',
@@ -147,30 +126,17 @@ const Dashboard: React.FC = () => {
               timestamp: Date.now(),
               url: window.location.origin
             },
-            // Additional service worker notification options
             actions: notification.priority === 'high' ? [
-              {
-                action: 'acknowledge',
-                title: 'Acknowledge',
-                icon: '/mcm-logo-192.png'
-              }
+              { action: 'acknowledge', title: 'Acknowledge', icon: '/mcm-logo-192.png' }
             ] : []
           });
-
-          // For service worker notifications, click handling is done in the service worker
-          
         } catch (swError) {
-          console.warn('Service worker notification failed, falling back to direct notification:', swError);
-          
-          // Fallback to direct notification if service worker fails
           await showDirectNotification(notification);
         }
       } else {
-        // No service worker, use direct notification
         await showDirectNotification(notification);
       }
 
-      // Show toast notification regardless
       toast({
         title: `🔔 ${notification.title}`,
         description: notification.body,
@@ -178,8 +144,6 @@ const Dashboard: React.FC = () => {
       });
 
     } catch (error) {
-      console.error('Failed to show browser notification:', error);
-      // Fallback to toast only
       toast({
         title: `🔔 ${notification.title}`,
         description: notification.body,
@@ -194,8 +158,7 @@ const Dashboard: React.FC = () => {
       if ('Notification' in window) {
         setNotificationsEnabled(Notification.permission === 'granted');
       }
-    } catch (error) {
-      console.error('Failed to initialize push notifications:', error);
+    } catch {
       setNotificationsEnabled(false);
     }
   };
@@ -203,27 +166,22 @@ const Dashboard: React.FC = () => {
   const loadRecentNotifications = async () => {
     try {
       setIsLoading(true);
-      // First try with acknowledged column, fallback without it
-      const { data, error } = await supabase 
+      const { data, error } = await supabase
         .from('notifications')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      // Handle notifications with or without acknowledged column
       const notificationsWithAck = (data || []).map(n => ({
         ...n,
         acknowledged: n.acknowledged || false
       }));
-      
+
       setNotifications(notificationsWithAck);
       setUnreadCount(notificationsWithAck.filter(n => !n.acknowledged).length);
     } catch (err) {
-      console.error('Failed to load notifications:', err);
       setNotifications([]);
       setUnreadCount(0);
       toast({
@@ -248,7 +206,6 @@ const Dashboard: React.FC = () => {
     try {
       setIsLoading(true);
 
-      // Check if notifications are supported
       if (!('Notification' in window)) {
         toast({
           title: "Notifications Not Supported",
@@ -258,7 +215,6 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      // Always request permission first to show browser dialog
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
         toast({
@@ -269,21 +225,17 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      // Update notifications enabled state
       setNotificationsEnabled(true);
 
-      // Prepare notification data
       const title = `MCM Alert - ${priority.toUpperCase()} Priority`;
       const body = `Test notification (${priority} priority) - ${new Date().toLocaleTimeString()}`;
-      
-      // Play sound first
+
       await playNotificationSound(priority);
 
-      // Show notification using service worker if available
       if ('serviceWorker' in navigator) {
         try {
           const registration = await navigator.serviceWorker.ready;
-          
+
           await registration.showNotification(title, {
             body,
             icon: '/mcm-logo-192.png',
@@ -294,20 +246,13 @@ const Dashboard: React.FC = () => {
             data: {
               priority,
               timestamp: Date.now(),
-              url: window.location.origin // To focus the app when clicked
+              url: window.location.origin
             },
             actions: priority === 'high' ? [
-              {
-                action: 'acknowledge',
-                title: 'Acknowledge'
-              }
+              { action: 'acknowledge', title: 'Acknowledge' }
             ] : []
           });
-          
         } catch (swError) {
-          console.warn('Service worker notification failed, falling back to direct notification:', swError);
-          
-          // Fallback to direct notification
           const notification = new Notification(title, {
             body,
             icon: '/mcm-logo-192.png',
@@ -317,23 +262,18 @@ const Dashboard: React.FC = () => {
             silent: false
           });
 
-          // Handle notification click
           notification.onclick = () => {
             window.focus();
             notification.close();
           };
 
-          // Auto-close notification after delay
           setTimeout(() => {
             try {
               notification.close();
-            } catch (e) {
-              console.warn('Could not close test notification:', e);
-            }
+            } catch (e) {}
           }, priority === 'high' ? 10000 : 5000);
         }
       } else {
-        // No service worker, use direct notification
         const notification = new Notification(title, {
           body,
           icon: '/mcm-logo-192.png',
@@ -351,13 +291,10 @@ const Dashboard: React.FC = () => {
         setTimeout(() => {
           try {
             notification.close();
-          } catch (e) {
-            console.warn('Could not close test notification:', e);
-          }
+          } catch (e) {}
         }, priority === 'high' ? 10000 : 5000);
       }
 
-      // Store in database - with error handling
       try {
         const response = await fetch('/api/notifications', {
           method: 'POST',
@@ -371,26 +308,20 @@ const Dashboard: React.FC = () => {
         });
 
         if (!response.ok) {
-          console.warn('API call failed, notification still shown locally');
+          // Still show locally even if API fails
         }
-      } catch (apiError) {
-        console.warn('API call failed:', apiError);
-        // Continue - notification was still shown to user
-      }
+      } catch {}
 
       toast({
         title: "✅ Notification Sent!",
         description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully!`,
       });
 
-      // Refresh notifications list
       loadRecentNotifications();
-      
-    } catch (error) {
-      console.error('Failed to send test notification:', error);
+    } catch (error: any) {
       toast({
         title: "Notification Failed",
-        description: error instanceof Error ? error.message : "Please allow notifications when prompted by your browser",
+        description: error?.message || "Please allow notifications when prompted by your browser",
         variant: "destructive",
       });
     } finally {
@@ -400,14 +331,9 @@ const Dashboard: React.FC = () => {
 
   const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
     try {
-      // Check if AudioContext is supported
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) {
-        console.warn('AudioContext not supported');
-        return;
-      }
+      if (!AudioContext) return;
 
-      // Different sound patterns based on priority
       const soundConfig = {
         low: { frequency: 400, duration: 0.3, volume: 0.1, pattern: [{ freq: 400, dur: 0.3 }] },
         medium: { frequency: 600, duration: 0.5, volume: 0.2, pattern: [{ freq: 600, dur: 0.25 }, { freq: 600, dur: 0.25 }] },
@@ -422,55 +348,37 @@ const Dashboard: React.FC = () => {
 
       const config = soundConfig[priority];
       const audioContext = new AudioContext();
-      
-      // Resume audio context if suspended (required for mobile)
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
-
-      // Play sound pattern
       let startTime = audioContext.currentTime;
-      
       for (const note of config.pattern) {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
-        
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
         oscillator.frequency.setValueAtTime(note.freq, startTime);
-        oscillator.type = priority === 'high' ? 'square' : 'sine'; // Different waveform for high priority
-        
+        oscillator.type = priority === 'high' ? 'square' : 'sine';
         gainNode.gain.setValueAtTime(config.volume, startTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + note.dur);
-        
         oscillator.start(startTime);
         oscillator.stop(startTime + note.dur);
-        
-        startTime += note.dur + 0.1; // Small gap between notes
+        startTime += note.dur + 0.1;
       }
-
-      // Clean up
       setTimeout(() => {
         try {
           audioContext.close();
-        } catch (e) {
-          console.warn('Could not close audio context:', e);
-        }
+        } catch (e) {}
       }, (config.duration + 1) * 1000);
 
-    } catch (error) {
-      console.warn('Could not play notification sound:', error);
-    }
+    } catch {}
   };
 
   const acknowledgeNotification = async (notificationId: string) => {
     try {
-      // Try to update via API first
       const response = await fetch('/api/notifications', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: notificationId,
           acknowledged: true
@@ -478,7 +386,6 @@ const Dashboard: React.FC = () => {
       });
 
       if (!response.ok) {
-        // Fallback to direct Supabase update
         const { error } = await supabase
           .from('notifications')
           .update({ acknowledged: true })
@@ -487,24 +394,20 @@ const Dashboard: React.FC = () => {
         if (error) throw error;
       }
 
-      // Update local state
-      setNotifications(prev => 
-        prev.map(n => 
-          n.id === notificationId 
+      setNotifications(prev =>
+        prev.map(n =>
+          n.id === notificationId
             ? { ...n, acknowledged: true }
             : n
         )
       );
-
-      // Update unread count
       setUnreadCount(prev => Math.max(0, prev - 1));
 
       toast({
         title: "✅ Notification Acknowledged",
         description: "Notification has been marked as read",
       });
-    } catch (error) {
-      console.error('Error acknowledging notification:', error);
+    } catch {
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge notification",
@@ -515,19 +418,13 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeAllNotifications = async () => {
     try {
-      // Try to update via API first
       const response = await fetch('/api/notifications', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          acknowledgeAll: true
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acknowledgeAll: true })
       });
 
       if (!response.ok) {
-        // Fallback to direct Supabase update
         const { error } = await supabase
           .from('notifications')
           .update({ acknowledged: true })
@@ -536,8 +433,7 @@ const Dashboard: React.FC = () => {
         if (error) throw error;
       }
 
-      // Update local state
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(n => ({ ...n, acknowledged: true }))
       );
       setUnreadCount(0);
@@ -546,8 +442,7 @@ const Dashboard: React.FC = () => {
         title: "✅ All Notifications Acknowledged",
         description: "All notifications have been marked as read",
       });
-    } catch (error) {
-      console.error('Error acknowledging all notifications:', error);
+    } catch {
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge all notifications",
@@ -556,14 +451,13 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Filter notifications based on search and filters
   const filteredNotifications = notifications.filter(notification => {
     const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         notification.body.toLowerCase().includes(searchTerm.toLowerCase());
-    
+      notification.body.toLowerCase().includes(searchTerm.toLowerCase());
+
     const matchesType = filterType === "all" || notification.type === filterType;
     const matchesPriority = filterPriority === "all" || notification.priority === filterPriority;
-    
+
     return matchesSearch && matchesType && matchesPriority;
   });
 
@@ -585,79 +479,49 @@ const Dashboard: React.FC = () => {
   "timestamp": "${new Date().toISOString()}"
 }`;
 
+  // Prepare user display values (with fallback)
+  const displayName = user?.name || 'MCM User';
+  const userEmail = user?.email || 'user@mcm-alerts.com';
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Main container with proper spacing */}
-      <main className="container mx-auto px-4 py-6">
-        {/* Enhanced Top Panel with App Title and User Info */}
+      <main className="container mx-auto px-2 md:px-4 py-6">
+
+        {/* Header Bar - Improved Responsive Layout */}
         <div className="bg-white/50 backdrop-blur-sm border border-border/50 rounded-lg p-4 mb-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            {/* Left side - App Title and User Info */}
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <img src="/mcm-logo-192.png" alt="MCM Logo" className="h-6 w-6" />
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">MCM Alerts</h1>
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm font-medium text-muted-foreground">MCM User</span>
-                <span className="text-xs text-muted-foreground">•</span>
-                <span className="text-sm text-muted-foreground">user@mcm-alerts.com</span>
-              </div>
+          <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2 sm:gap-0">
+            {/* Logo + App Name */}
+            <div className="flex items-center gap-2 mx-auto sm:mx-0">
+              <img src="/mcm-logo-192.png" alt="MCM Logo" className="h-7 w-7" />
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">MCM Alerts</h1>
             </div>
-            
-            {/* Right side - Action buttons */}
-            <div className="flex items-center gap-3">
-              {/* Settings Button */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="flex items-center gap-2 hover:bg-accent/50 transition-colors"
-                onClick={() => navigate('/settings')}
-              >
-                <Settings className="h-4 w-4" />
-                <span className="hidden sm:inline">Settings</span>
-              </Button>
-              
-              {/* Notifications Bell with Badge */}
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="relative flex items-center gap-2 hover:bg-accent/50 transition-colors"
-                onClick={() => { navigate('/notifications'); markAsRead(); }}
-              >
-                <Bell className="h-4 w-4" />
-                <span className="hidden sm:inline">Notifications</span>
-                {unreadCount > 0 && (
-                  <Badge 
-                    variant="destructive" 
-                    className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs font-bold animate-pulse"
-                  >
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </Badge>
-                )}
-              </Button>
-              
-              {/* Divider */}
-              <div className="w-px h-6 bg-border/50"></div>
-              
-              {/* Logout Button */}
-              <Button 
-                onClick={handleLogout} 
-                variant="ghost" 
-                size="sm"
-                className="flex items-center gap-2 hover:bg-destructive/10 hover:text-destructive transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Logout</span>
-              </Button>
+            {/* Right: user pill + actions (responsive) */}
+            <div className="flex flex-col sm:flex-row items-center sm:gap-3 gap-1 mt-2 sm:mt-0 w-full sm:w-auto">
+              <div className="flex items-center justify-center gap-2 bg-accent/30 px-2 py-1 rounded-full text-xs w-full sm:w-auto max-w-full">
+                <span className="font-medium truncate">{displayName}</span>
+                <span className="hidden sm:inline text-muted-foreground">•</span>
+                <span className="text-muted-foreground truncate max-w-[110px]">{userEmail}</span>
+              </div>
+              <div className="flex gap-2 mt-1 sm:mt-0">
+                <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} aria-label="Settings"><Settings className="h-5 w-5" /></Button>
+                <Button variant="ghost" size="icon" onClick={() => { navigate('/notifications'); markAsRead(); }} aria-label="Notifications" className="relative">
+                  <Bell className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <Badge variant="destructive"
+                      className="absolute -top-1 -right-1 h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold animate-pulse"
+                    >{unreadCount > 99 ? '99+' : unreadCount}</Badge>
+                  )}
+                </Button>
+                <Button variant="ghost" size="icon" onClick={handleLogout} aria-label="Logout"><LogOut className="h-5 w-5" /></Button>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Topic Management */}
             <TopicManagement />
 
             {/* API Integration */}
@@ -721,7 +585,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </CardHeader>
               
-              {/* Search and Filter Controls - Fixed Layout */}
+              {/* Search and Filter Controls */}
               <div className="px-6 pb-4 space-y-3">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
