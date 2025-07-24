@@ -167,4 +167,209 @@ exports.handler = async (event, context) => {
 // Store push subscriptions (in production, use a database)
 let subscriptions = [];
 
-exports.handler =
+exports.handler = async (event, context) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers };
+  }
+
+  if (event.httpMethod === 'POST') {
+    try {
+      const subscription = JSON.parse(event.body || '{}');
+      
+      // Validate subscription data
+      if (!subscription.endpoint || !subscription.keys) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({ 
+            success: false, 
+            error: 'Invalid subscription data' 
+          })
+        };
+      }
+
+      // Store subscription (in production, save to database)
+      const existingIndex = subscriptions.findIndex(s => s.endpoint === subscription.endpoint);
+      if (existingIndex >= 0) {
+        subscriptions[existingIndex] = subscription;
+      } else {
+        subscriptions.push(subscription);
+      }
+
+      console.log(`Stored push subscription. Total subscriptions: ${subscriptions.length}`);
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          message: 'Subscription stored successfully',
+          subscriptionCount: subscriptions.length
+        })
+      };
+    } catch (error) {
+      console.error('Error storing subscription:', error);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: error.message 
+        })
+      };
+    }
+  }
+
+  return {
+    statusCode: 405,
+    headers,
+    body: JSON.stringify({ error: 'Method not allowed' })
+  };
+};
+
+// netlify/functions/heartbeat.js
+exports.handler = async (event, context) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers };
+  }
+
+  if (event.httpMethod === 'POST') {
+    try {
+      const body = JSON.parse(event.body || '{}');
+      
+      // In production, you'd update the subscription's last_seen timestamp
+      console.log('Heartbeat received from:', body.endpoint);
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          timestamp: Date.now()
+        })
+      };
+    } catch (error) {
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: error.message 
+        })
+      };
+    }
+  }
+
+  return {
+    statusCode: 405,
+    headers,
+    body: JSON.stringify({ error: 'Method not allowed' })
+  };
+};
+
+// netlify/functions/send-push.js
+// This would be used by your backend systems to send push notifications
+const webpush = require('web-push');
+
+// Configure web-push (you'll need to set these as environment variables)
+webpush.setVapidDetails(
+  'mailto:your-email@example.com',
+  process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAKeFXjWWqlaGSb0TSa1TCEdqNB0NDrWJZnIa5oZUMoMJpE',
+  process.env.VAPID_PRIVATE_KEY || 'your-private-key-here'
+);
+
+exports.handler = async (event, context) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers };
+  }
+
+  if (event.httpMethod === 'POST') {
+    try {
+      const body = JSON.parse(event.body || '{}');
+      const { title, message, priority = 'medium', data = {} } = body;
+
+      const notificationPayload = {
+        title,
+        body: message,
+        priority,
+        icon: '/mcm-logo-192.png',
+        badge: '/mcm-logo-192.png',
+        tag: `mcm-alert-${Date.now()}`,
+        data: {
+          ...data,
+          timestamp: Date.now(),
+          url: '/'
+        }
+      };
+
+      // In production, you'd get subscriptions from your database
+      // For now, we'll use the in-memory array
+      let successCount = 0;
+      let failureCount = 0;
+
+      for (const subscription of subscriptions) {
+        try {
+          await webpush.sendNotification(subscription, JSON.stringify(notificationPayload));
+          successCount++;
+        } catch (error) {
+          console.error('Failed to send push notification:', error);
+          failureCount++;
+          
+          // Remove invalid subscriptions
+          if (error.statusCode === 410) {
+            subscriptions = subscriptions.filter(s => s.endpoint !== subscription.endpoint);
+          }
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          message: 'Push notifications sent',
+          successCount,
+          failureCount,
+          totalSubscriptions: subscriptions.length
+        })
+      };
+    } catch (error) {
+      console.error('Error sending push notifications:', error);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: error.message 
+        })
+      };
+    }
+  }
+
+  return {
+    statusCode: 405,
+    headers,
+    body: JSON.stringify({ error: 'Method not allowed' })
+  };
+};
