@@ -255,7 +255,7 @@ const InAppNotificationSystem: React.FC = () => {
         </Badge>
       </div>
 
-      {/* Test Button - Remove in production */}
+      {/* Test Button - Remove in production 
       <div className="fixed bottom-4 left-4 z-40">
         <Button
           onClick={sendTestRealTimeNotification}
@@ -267,7 +267,7 @@ const InAppNotificationSystem: React.FC = () => {
           Test Real-time
         </Button>
       </div>
-
+      */}
       {/* Notification Container */}
       {visibleNotifications.length > 0 && (
         <div className="fixed top-16 right-4 z-50 space-y-3 max-w-sm">
