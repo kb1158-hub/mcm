@@ -16,7 +16,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Trash2, Monitor } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/services/notificationService';
+import { supabase } from '@/supabaseClient';
 
 interface Topic {
   id: string;
