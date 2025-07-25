@@ -12,7 +12,8 @@ import TopicManagement from '@/components/TopicManagement';
 import { pushService } from '@/services/pushNotificationService';
 import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell, User, ChevronDown, Menu, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { fetchRecentNotifications, addNotification, supabase } from '@/services/notificationService';
+import { fetchRecentNotifications, addNotification } from '@/services/notificationService';
+import { supabase } from '@/supabaseClient';
 
 interface Notification {
   id: string;
