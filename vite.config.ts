@@ -6,16 +6,51 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'service-worker.js',
+      strategies: 'generateSW', // Use generateSW instead of injectManifest
       registerType: 'autoUpdate',
-      injectManifest: {
-        swSrc: 'src/service-worker.js',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      manifest: {
+        name: 'MCM Alerts',
+        short_name: 'MCM Alerts',
+        description: 'MCM Alert Management System',
+        theme_color: '#ffffff',
+        icons: [
+          {
+            src: 'mcm-logo-192.png',
+            sizes: '192x192',
+            type: 'image/png'
+          },
+          {
+            src: 'mcm-logo-512.png',
+            sizes: '512x512',
+            type: 'image/png'
+          }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/api\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'api-cache',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 300 // 5 minutes
+              }
+            }
+          }
+        ]
       },
       devOptions: {
         enabled: true
       }
     })
-  ]
+  ],
+  resolve: {
+    alias: {
+      '@': '/src'
+    }
+  }
 });
