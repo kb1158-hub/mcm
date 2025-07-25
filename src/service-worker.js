@@ -1,8 +1,9 @@
 // Simple MCM Alerts Service Worker
 // Handles push notifications and basic caching
 
-// Required for Workbox/vite-plugin-pwa
-self.__WB_MANIFEST;
+// Required for Workbox/vite-plugin-pwa - DO NOT REMOVE THIS LINE
+// Workbox will replace this with the actual precache manifest
+const precacheManifest = self.__WB_MANIFEST;
 
 const CACHE_NAME = 'mcm-alerts-v1';
 const NOTIFICATION_TAG = 'mcm-notification';
