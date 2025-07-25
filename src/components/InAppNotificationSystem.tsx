@@ -5,218 +5,143 @@ import { X, Bell, Wifi, WifiOff, AlertCircle, CheckCircle, Info } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
-import { pushService } from '@/services/pushNotificationService';
-import { realTimeNotificationService } from '@/services/realTimeNotificationService';
+import { unifiedNotificationService, UnifiedNotification } from '@/services/unifiedNotificationService';
 
-interface RealTimeNotification {
-  id: string;
-  type: string;
-  priority: 'low' | 'medium' | 'high';
-  title: string;
-  message: string;
-  timestamp: string;
-  data?: any;
-}
-
-interface DisplayNotification extends RealTimeNotification {
+interface DisplayNotification extends UnifiedNotification {
   isVisible: boolean;
   dismissedAt?: number;
 }
 
-// Static user with id '1'
-const user = { id: '1' };
-
 const InAppNotificationSystem: React.FC = () => {
   const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionType, setConnectionType] = useState<string>('disconnected');
-  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState(unifiedNotificationService.getConnectionStatus());
 
   useEffect(() => {
-    // Initialize audio context
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      setAudioContext(ctx);
-    } catch (error) {
-      console.warn('Audio context not supported:', error);
-    }
-
-    const initializeServices = async () => {
+    const initializeService = async () => {
       try {
-        // Initialize push notification service
-        await pushService.initialize();
-        console.log('Push service initialized');
-
-        // Initialize real-time notification service with static user id
-        if (user?.id) {
-          await realTimeNotificationService.initialize(user.id);
-          console.log('Real-time notification service initialized');
-        } else {
-          console.warn('User not logged in, skipping real-time notifications initialization');
-        }
-
-        // Set up real-time notification listener
-        const unsubscribe = realTimeNotificationService.addListener((notification) => {
-          console.log('Received real-time notification:', notification);
-
-          const displayNotification: DisplayNotification = {
-            ...notification,
-            isVisible: true,
-          };
-
-          setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]); // Keep max 5
-
-          playNotificationSound(notification.priority);
-
-          const toastMessage = `${notification.title}: ${notification.message}`;
-          switch (notification.priority) {
-            case 'high':
-              toast.error(toastMessage, { duration: 8000 });
-              break;
-            case 'medium':
-              toast.success(toastMessage, { duration: 5000 });
-              break;
-            case 'low':
-              toast.info(toastMessage, { duration: 3000 });
-              break;
-          }
-        });
-
-        // Monitor connection status
-        const statusInterval = setInterval(() => {
-          const status = realTimeNotificationService.getConnectionStatus();
-          setIsConnected(status.isConnected);
-          setConnectionType(status.connectionType);
-        }, 2000);
-
-        return () => {
-          unsubscribe();
-          clearInterval(statusInterval);
-        };
+        console.log('Initializing unified notification service...');
+        await unifiedNotificationService.initialize();
+        console.log('Unified notification service initialized successfully');
       } catch (error) {
-        console.error('Failed to initialize notification services:', error);
+        console.error('Failed to initialize unified notification service:', error);
         toast.error('Failed to initialize notifications. Some features may not work.');
       }
     };
 
-    initializeServices();
+    // Initialize the service
+    initializeService();
 
-    // Listen for service worker messages (push notifications)
-    const handleServiceWorkerMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'PUSH_NOTIFICATION_RECEIVED') {
-        const notificationData = event.data.notificationData;
-        const realTimeNotification: RealTimeNotification = {
-          id: `sw-${Date.now()}`,
-          type: notificationData.type || 'alert',
-          priority: notificationData.priority || 'medium',
-          title: notificationData.title || 'MCM Alert',
-          message: notificationData.body || notificationData.message || 'New notification',
-          timestamp: new Date().toISOString(),
-          data: notificationData.data
-        };
+    // Set up in-app notification listener
+    const unsubscribeInApp = unifiedNotificationService.addInAppListener((notification) => {
+      console.log('Received in-app notification:', notification);
 
-        const displayNotification: DisplayNotification = {
-          ...realTimeNotification,
-          isVisible: true,
-        };
+      const displayNotification: DisplayNotification = {
+        ...notification,
+        isVisible: true,
+      };
 
-        setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]);
-        playNotificationSound(realTimeNotification.priority);
+      setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]); // Keep max 5
 
-        console.log('Received push notification from service worker:', realTimeNotification);
+      // Show toast notification based on priority
+      const toastMessage = `${notification.title}: ${notification.message || notification.body || 'New notification'}`;
+      switch (notification.priority) {
+        case 'high':
+        case 'urgent':
+          toast.error(toastMessage, { duration: 8000 });
+          break;
+        case 'medium':
+          toast.success(toastMessage, { duration: 5000 });
+          break;
+        case 'low':
+          toast.info(toastMessage, { duration: 3000 });
+          break;
+        default:
+          toast(toastMessage, { duration: 4000 });
       }
-    };
+    });
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
-    }
+    // Set up push notification listener (for notifications received while app is open)
+    const unsubscribePush = unifiedNotificationService.addPushListener((notification) => {
+      console.log('Received push notification while app is open:', notification);
 
+      const displayNotification: DisplayNotification = {
+        ...notification,
+        isVisible: true,
+      };
+
+      setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]);
+
+      // Show toast for push notifications too
+      const toastMessage = `${notification.title}: ${notification.message || notification.body || 'New notification'}`;
+      toast.info(`📱 ${toastMessage}`, { duration: 5000 });
+    });
+
+    // Monitor connection status
+    const statusInterval = setInterval(() => {
+      const status = unifiedNotificationService.getConnectionStatus();
+      setConnectionStatus(status);
+    }, 2000);
+
+    // Cleanup function
     return () => {
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
-      }
-      realTimeNotificationService.disconnect();
-      if (audioContext) {
-        audioContext.close();
-      }
+      unsubscribeInApp();
+      unsubscribePush();
+      clearInterval(statusInterval);
+      unifiedNotificationService.disconnect();
     };
-  }, [audioContext]);
+  }, []);
 
-  const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
-    if (!audioContext) return;
-
+  const dismissNotification = async (notification: DisplayNotification) => {
+    // Mark as read in the database
     try {
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
-      }
-
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
-      const duration = priority === 'high' ? 1.0 : 0.5;
-
-      oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
-      oscillator.type = 'sine';
-
-      const volume = priority === 'high' ? 0.3 : priority === 'medium' ? 0.2 : 0.1;
-      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + duration);
-
-      if (priority === 'high') {
-        setTimeout(() => {
-          const oscillator2 = audioContext.createOscillator();
-          const gainNode2 = audioContext.createGain();
-
-          oscillator2.connect(gainNode2);
-          gainNode2.connect(audioContext.destination);
-
-          oscillator2.frequency.setValueAtTime(1000, audioContext.currentTime);
-          oscillator2.type = 'sine';
-          gainNode2.gain.setValueAtTime(0.2, audioContext.currentTime);
-          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-          oscillator2.start(audioContext.currentTime);
-          oscillator2.stop(audioContext.currentTime + 0.3);
-        }, 200);
-      }
+      await unifiedNotificationService.markAsRead(notification.id);
     } catch (error) {
-      console.error('Failed to play notification sound:', error);
+      console.error('Failed to mark notification as read:', error);
     }
-  };
 
-  const dismissNotification = (id: string) => {
+    // Update local state
     setNotifications(prev =>
       prev.map(n =>
-        n.id === id
+        n.id === notification.id
           ? { ...n, isVisible: false, dismissedAt: Date.now() }
           : n
       )
     );
 
+    // Remove from local state after animation
     setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
+      setNotifications(prev => prev.filter(n => n.id !== notification.id));
     }, 300);
   };
 
-  const clearAllNotifications = () => {
+  const clearAllNotifications = async () => {
+    // Mark all visible notifications as read
+    try {
+      const visibleNotificationIds = notifications
+        .filter(n => n.isVisible)
+        .map(n => n.id);
+      
+      // Mark each as read (you might want to add a batch operation to your service)
+      await Promise.all(
+        visibleNotificationIds.map(id => unifiedNotificationService.markAsRead(id))
+      );
+    } catch (error) {
+      console.error('Failed to mark notifications as read:', error);
+    }
+
+    // Update local state
     setNotifications(prev =>
       prev.map(n => ({ ...n, isVisible: false, dismissedAt: Date.now() }))
     );
 
+    // Remove from local state after animation
     setTimeout(() => {
       setNotifications([]);
     }, 300);
   };
 
   const getNotificationIcon = (type: string, priority: string) => {
-    if (priority === 'high') {
+    if (priority === 'high' || priority === 'urgent') {
       return <AlertCircle className="h-5 w-5 text-red-500" />;
     }
 
@@ -227,6 +152,8 @@ const InAppNotificationSystem: React.FC = () => {
         return <Info className="h-5 w-5 text-blue-500" />;
       case 'price_change':
         return <CheckCircle className="h-5 w-5 text-green-500" />;
+      case 'push':
+        return <Bell className="h-5 w-5 text-purple-500" />;
       default:
         return <AlertCircle className="h-5 w-5 text-orange-500" />;
     }
@@ -235,6 +162,7 @@ const InAppNotificationSystem: React.FC = () => {
   const getPriorityStyles = (priority: string) => {
     switch (priority) {
       case 'high':
+      case 'urgent':
         return 'bg-red-50 border-red-200 shadow-lg';
       case 'medium':
         return 'bg-blue-50 border-blue-200 shadow-md';
@@ -245,23 +173,91 @@ const InAppNotificationSystem: React.FC = () => {
     }
   };
 
+  const getConnectionStatusText = () => {
+    const { supabase, push } = connectionStatus;
+    
+    if (supabase.isConnected && push.serviceWorkerRegistered) {
+      return 'Fully Connected';
+    } else if (supabase.isConnected) {
+      return 'In-App Connected';
+    } else if (push.serviceWorkerRegistered) {
+      return 'Push Only';
+    } else {
+      return 'Disconnected';
+    }
+  };
+
+  const getConnectionIcon = () => {
+    const { supabase } = connectionStatus;
+    return supabase.isConnected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />;
+  };
+
+  const getConnectionVariant = () => {
+    const { supabase, push } = connectionStatus;
+    
+    if (supabase.isConnected && push.serviceWorkerRegistered) {
+      return 'default'; // Green
+    } else if (supabase.isConnected || push.serviceWorkerRegistered) {
+      return 'secondary'; // Yellow/Orange
+    } else {
+      return 'destructive'; // Red
+    }
+  };
+
   const visibleNotifications = notifications.filter(n => n.isVisible);
+
+  // Helper function to send test notifications
+  const sendTestNotification = async (priority: 'low' | 'medium' | 'high' | 'urgent' = 'medium') => {
+    try {
+      await unifiedNotificationService.sendTestNotification(priority, false);
+      toast.success(`Test ${priority} priority notification sent!`);
+    } catch (error) {
+      console.error('Failed to send test notification:', error);
+      toast.error('Failed to send test notification');
+    }
+  };
 
   return (
     <>
       {/* Connection Status Indicator */}
-      <div className="fixed top-4 left-4 z-40">
+      <div className="fixed top-4 left-4 z-40 flex items-center gap-2">
         <Badge
-          variant={isConnected ? 'default' : 'destructive'}
+          variant={getConnectionVariant()}
           className="flex items-center gap-1"
         >
-          {isConnected ? (
-            <Wifi className="h-3 w-3" />
-          ) : (
-            <WifiOff className="h-3 w-3" />
-          )}
-          {isConnected ? `Connected (${connectionType})` : 'Disconnected'}
+          {getConnectionIcon()}
+          {getConnectionStatusText()}
         </Badge>
+        
+        {/* Debug Test Buttons - Remove in production */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="flex gap-1">
+            <Button
+              onClick={() => sendTestNotification('low')}
+              size="sm"
+              variant="outline"
+              className="text-xs"
+            >
+              Test Low
+            </Button>
+            <Button
+              onClick={() => sendTestNotification('medium')}
+              size="sm"
+              variant="outline"
+              className="text-xs"
+            >
+              Test Med
+            </Button>
+            <Button
+              onClick={() => sendTestNotification('high')}
+              size="sm"
+              variant="outline"
+              className="text-xs"
+            >
+              Test High
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Notification Container */}
@@ -303,16 +299,42 @@ const InAppNotificationSystem: React.FC = () => {
                         {notification.title}
                       </h4>
                       <Badge
-                        variant={notification.priority === 'high' ? 'destructive' : 'outline'}
+                        variant={
+                          notification.priority === 'high' || notification.priority === 'urgent' 
+                            ? 'destructive' 
+                            : 'outline'
+                        }
                         className="text-xs flex-shrink-0"
                       >
                         {notification.priority.toUpperCase()}
                       </Badge>
                     </div>
-                    <p className="text-sm text-gray-700 truncate">{notification.message}</p>
-                    <time className="text-xs text-gray-500 mt-1 block">
-                      {new Date(notification.timestamp).toLocaleTimeString()}
-                    </time>
+                    <p className="text-sm text-gray-700 line-clamp-2">
+                      {notification.message || notification.body || 'New notification'}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <time className="text-xs text-gray-500">
+                        {new Date(notification.timestamp).toLocaleTimeString()}
+                      </time>
+                      {notification.site && (
+                        <Badge variant="outline" className="text-xs">
+                          {notification.site}
+                        </Badge>
+                      )}
+                    </div>
+                    {notification.action_url && (
+                      <Button
+                        size="sm"
+                        variant="link"
+                        className="p-0 h-auto text-xs text-blue-600 mt-1"
+                        onClick={() => {
+                          window.open(notification.action_url, '_blank');
+                          dismissNotification(notification);
+                        }}
+                      >
+                        View Details →
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -321,8 +343,8 @@ const InAppNotificationSystem: React.FC = () => {
                   size="sm"
                   variant="ghost"
                   aria-label="Dismiss notification"
-                  onClick={() => dismissNotification(notification.id)}
-                  className="ml-2 text-gray-400 hover:text-gray-600 p-1"
+                  onClick={() => dismissNotification(notification)}
+                  className="ml-2 text-gray-400 hover:text-gray-600 p-1 flex-shrink-0"
                 >
                   <X className="h-4 w-4" />
                 </Button>
