@@ -1,8 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = 'https://rswwlwybqsinzckzwcpb.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJzd3dsd3licXNpbnpja3p3Y3BiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMzY0MjcsImV4cCI6MjA2ODcxMjQyN30.OFDBSFnSWbage9xI5plqis7RAFKnJPuzO1JWUHE7yDM';
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// src/services/notificationService.ts
+import { supabase } from '../supabaseClient'; // adjust the relative path as needed
 
 export async function fetchRecentNotifications(limit = 5) {
   try {
@@ -57,7 +54,7 @@ export async function fetchAllNotifications() {
   }
 }
 
-export async function addNotification({ title, body }) {
+export async function addNotification({ title, body }: { title: string; body: string }) {
   try {
     // Try to add via API first
     const response = await fetch('/api/notifications', {
@@ -70,7 +67,7 @@ export async function addNotification({ title, body }) {
         message: body,
         type: 'manual',
         priority: 'medium'
-      })
+      }),
     });
 
     if (response.ok) {
