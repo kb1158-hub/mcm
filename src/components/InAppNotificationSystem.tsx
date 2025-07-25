@@ -14,7 +14,6 @@ interface DisplayNotification extends RealTimeNotification {
 }
 
 const InAppNotificationSystem: React.FC = () => {
-  const user = useUser(); // Get logged-in user
   const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<string>('disconnected');
