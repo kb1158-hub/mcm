@@ -9,150 +9,144 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import TopicManagement from '@/components/TopicManagement';
-import { pushService } from '@/services/pushNotificationService';
+import { unifiedNotificationService, UnifiedNotification } from '@/services/unifiedNotificationService';
 import { LogOut, Copy, ExternalLink, Search, Filter, Check, Settings, Bell, User, ChevronDown, Menu, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { fetchRecentNotifications, addNotification } from '@/services/notificationService';
-import { supabase } from '@/supabaseClient';
-
-interface Notification {
-  id: string;
-  title: string;
-  body: string;
-  type?: string;
-  priority?: 'low' | 'medium' | 'high';
-  acknowledged?: boolean;
-  created_at: string;
-}
 
 const Dashboard: React.FC = () => {
   const { logout, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<UnifiedNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState(unifiedNotificationService.getConnectionStatus());
   const navigate = useNavigate();
 
   useEffect(() => {
-    initializePushNotifications();
+    initializeNotifications();
     loadRecentNotifications();
-    setupRealtimeSubscription();
-    setupApiNotificationListener();
+    setupNotificationListeners();
+    
+    // Status monitoring
+    const statusInterval = setInterval(() => {
+      setConnectionStatus(unifiedNotificationService.getConnectionStatus());
+    }, 5000);
 
     return () => {
-      // Cleanup will be handled by the channel unsubscribe
+      clearInterval(statusInterval);
     };
   }, []);
 
-  const setupApiNotificationListener = () => {
-    // Listen for API notifications from the enhanced push service
-    const handleApiNotification = (event: CustomEvent) => {
-      const notificationData = event.detail;
-      
-      // Add to notifications list immediately
-      const newNotification: Notification = {
-        id: Date.now().toString(),
-        title: notificationData.title,
-        body: notificationData.body,
-        priority: notificationData.priority || 'medium',
-        acknowledged: false,
-        created_at: new Date().toISOString(),
-        type: 'api'
-      };
-
-      setNotifications(prev => [newNotification, ...prev.slice(0, 49)]);
-      setUnreadCount(prev => prev + 1);
-
-      // Show toast notification
-      toast({
-        title: `🔔 ${notificationData.title}`,
-        description: notificationData.body,
-        duration: 5000,
-      });
-    };
-
-    window.addEventListener('api-notification-received', handleApiNotification as EventListener);
-
-    return () => {
-      window.removeEventListener('api-notification-received', handleApiNotification as EventListener);
-    };
-  };
-
-  const setupRealtimeSubscription = () => {
-    // Set up real-time subscription for database notifications
-    const channel = supabase
-      .channel('notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications' },
-        (payload) => {
-          console.log('Database notification received:', payload);
-          
-          const newNotification = payload.new as Notification;
-          
-          // Avoid duplicates by checking if notification already exists
-          setNotifications(prev => {
-            const exists = prev.some(n => n.id === newNotification.id);
-            if (!exists) {
-              setUnreadCount(prevCount => prevCount + 1);
-              
-              // Use the enhanced push service for immediate real-time display
-              pushService.showApiNotification(
-                newNotification.title,
-                newNotification.body,
-                newNotification.priority || 'medium'
-              );
-              
-              return [newNotification, ...prev.slice(0, 49)];
-            }
-            return prev;
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
-  };
-
-  const initializePushNotifications = async () => {
+  const initializeNotifications = async () => {
     try {
-      await pushService.initialize();
+      console.log('[Dashboard] Initializing notifications...');
+      
+      // Check if service is already initialized
+      const status = unifiedNotificationService.getConnectionStatus();
+      if (!status.isInitialized) {
+        await unifiedNotificationService.initialize();
+      }
+      
+      // Check notification permission
       if ('Notification' in window) {
         setNotificationsEnabled(Notification.permission === 'granted');
       }
+      
+      // Subscribe to push if supported
+      if (status.push.supported && Notification.permission === 'granted') {
+        await unifiedNotificationService.subscribeToPush();
+      }
+      
+      console.log('[Dashboard] Notifications initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize push notifications:', error);
+      console.error('[Dashboard] Failed to initialize notifications:', error);
       setNotificationsEnabled(false);
     }
+  };
+
+  const setupNotificationListeners = () => {
+    console.log('[Dashboard] Setting up notification listeners...');
+    
+    // Listen for in-app notifications
+    const unsubscribeInApp = unifiedNotificationService.addInAppListener((notification) => {
+      console.log('[Dashboard] In-app notification received:', notification);
+      
+      // Add to notifications list
+      setNotifications(prev => {
+        const exists = prev.some(n => n.id === notification.id);
+        if (!exists) {
+          setUnreadCount(prevCount => prevCount + 1);
+          
+          // Show toast notification
+          toast({
+            title: `🔔 ${notification.title}`,
+            description: notification.message || notification.body || 'New notification',
+            duration: 5000,
+          });
+          
+          return [notification, ...prev.slice(0, 49)];
+        }
+        return prev;
+      });
+    });
+
+    // Listen for push notifications
+    const unsubscribePush = unifiedNotificationService.addPushListener((notification) => {
+      console.log('[Dashboard] Push notification received:', notification);
+      
+      // Add to notifications list
+      setNotifications(prev => {
+        const exists = prev.some(n => n.id === notification.id);
+        if (!exists) {
+          setUnreadCount(prevCount => prevCount + 1);
+          
+          // Show toast notification
+          toast({
+            title: `📱 ${notification.title}`,
+            description: notification.message || notification.body || 'New push notification',
+            duration: 5000,
+          });
+          
+          return [notification, ...prev.slice(0, 49)];
+        }
+        return prev;
+      });
+    });
+
+    // Listen for global notification events
+    const handleGlobalNotification = (event: CustomEvent) => {
+      const { notification, type } = event.detail;
+      console.log(`[Dashboard] Global ${type} notification:`, notification);
+    };
+
+    window.addEventListener('unified-notification-received', handleGlobalNotification as EventListener);
+
+    return () => {
+      unsubscribeInApp();
+      unsubscribePush();
+      window.removeEventListener('unified-notification-received', handleGlobalNotification as EventListener);
+    };
   };
 
   const loadRecentNotifications = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-
-      const notificationsWithAck = (data || []).map(n => ({
-        ...n,
-        acknowledged: n.acknowledged || false
-      }));
-
-      setNotifications(notificationsWithAck);
-      setUnreadCount(notificationsWithAck.filter(n => !n.acknowledged).length);
-    } catch (err) {
-      console.error('Error loading notifications:', err);
+      console.log('[Dashboard] Loading recent notifications...');
+      
+      const recentNotifications = await unifiedNotificationService.getNotifications(50, 0, false);
+      setNotifications(recentNotifications);
+      
+      const unreadCountFromService = await unifiedNotificationService.getUnreadCount();
+      setUnreadCount(unreadCountFromService);
+      
+      console.log(`[Dashboard] Loaded ${recentNotifications.length} notifications, ${unreadCountFromService} unread`);
+    } catch (error) {
+      console.error('[Dashboard] Error loading notifications:', error);
       setNotifications([]);
       setUnreadCount(0);
       toast({
@@ -166,6 +160,9 @@ const Dashboard: React.FC = () => {
   };
 
   const handleLogout = () => {
+    // Cleanup notification service
+    unifiedNotificationService.disconnect();
+    
     logout();
     toast({
       title: "Logged Out",
@@ -173,26 +170,18 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const sendTestNotification = async (priority: 'low' | 'medium' | 'high') => {
+  const sendTestNotification = async (priority: 'low' | 'medium' | 'high' | 'urgent') => {
     try {
       setIsLoading(true);
-
-      if (!('Notification' in window)) {
-        toast({
-          title: "Notifications Not Supported",
-          description: "Your browser does not support notifications",
-          variant: "destructive",
-        });
-        return;
-      }
+      console.log(`[Dashboard] Sending test notification with ${priority} priority...`);
 
       // Request permission if not already granted
-      if (Notification.permission !== 'granted') {
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
+      if (!notificationsEnabled) {
+        const hasPermission = await unifiedNotificationService.requestNotificationPermission();
+        if (!hasPermission) {
           toast({
             title: "Notifications Blocked",
-            description: "Please click 'Allow' in the browser dialog to enable notifications",
+            description: "Please allow notifications in your browser settings",
             variant: "destructive",
           });
           return;
@@ -200,19 +189,21 @@ const Dashboard: React.FC = () => {
         setNotificationsEnabled(true);
       }
 
-      // Use the enhanced push service for test notifications
-      await pushService.sendTestNotification(priority);
-
+      // Send test notification using unified service
+      const notification = await unifiedNotificationService.sendTestNotification(priority, true);
+      
       toast({
-        title: "✅ Notification Sent!",
+        title: "✅ Test Notification Sent!",
         description: `${priority.charAt(0).toUpperCase() + priority.slice(1)} priority notification sent successfully!`,
       });
 
+      console.log('[Dashboard] Test notification sent:', notification);
+      
       // Reload notifications to show the new test notification
       await loadRecentNotifications();
       
     } catch (error: any) {
-      console.error('Test notification error:', error);
+      console.error('[Dashboard] Test notification error:', error);
       toast({
         title: "Notification Failed",
         description: error?.message || "Failed to send test notification",
@@ -225,19 +216,15 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeNotification = async (notificationId: string) => {
     try {
-      // Update in database
-      const { error } = await supabase
-        .from('notifications')
-        .update({ acknowledged: true })
-        .eq('id', notificationId);
-
-      if (error) throw error;
+      console.log(`[Dashboard] Acknowledging notification: ${notificationId}`);
+      
+      await unifiedNotificationService.markAsRead(notificationId);
 
       // Update local state
       setNotifications(prev =>
         prev.map(n =>
           n.id === notificationId
-            ? { ...n, acknowledged: true }
+            ? { ...n, is_read: true, acknowledged: true }
             : n
         )
       );
@@ -248,7 +235,7 @@ const Dashboard: React.FC = () => {
         description: "Notification has been marked as read",
       });
     } catch (error) {
-      console.error('Error acknowledging notification:', error);
+      console.error('[Dashboard] Error acknowledging notification:', error);
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge notification",
@@ -259,15 +246,12 @@ const Dashboard: React.FC = () => {
 
   const acknowledgeAllNotifications = async () => {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ acknowledged: true })
-        .eq('acknowledged', false);
-
-      if (error) throw error;
+      console.log('[Dashboard] Acknowledging all notifications...');
+      
+      await unifiedNotificationService.markAllAsRead();
 
       setNotifications(prev =>
-        prev.map(n => ({ ...n, acknowledged: true }))
+        prev.map(n => ({ ...n, is_read: true, acknowledged: true }))
       );
       setUnreadCount(0);
 
@@ -276,7 +260,7 @@ const Dashboard: React.FC = () => {
         description: "All notifications have been marked as read",
       });
     } catch (error) {
-      console.error('Error acknowledging all notifications:', error);
+      console.error('[Dashboard] Error acknowledging all notifications:', error);
       toast({
         title: "❌ Error",
         description: "Failed to acknowledge all notifications",
@@ -293,7 +277,7 @@ const Dashboard: React.FC = () => {
 
   const filteredNotifications = notifications.filter(notification => {
     const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      notification.body.toLowerCase().includes(searchTerm.toLowerCase());
+      (notification.message || notification.body || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesType = filterType === "all" || notification.type === filterType;
     const matchesPriority = filterPriority === "all" || notification.priority === filterPriority;
@@ -329,19 +313,35 @@ const Dashboard: React.FC = () => {
                   alt="MCM Logo" 
                   className="h-8 w-8 rounded-lg shadow-sm ring-2 ring-primary/10" 
                 />
-                <div className="absolute -top-1 -right-1 h-3 w-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
+                <div className={`absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-white ${
+                  connectionStatus.supabase.isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                }`}></div>
               </div>
               <div>
                 <h1 className="text-xl font-bold tracking-tight text-foreground">MCM Alerts</h1>
-                <p className="text-xs text-muted-foreground hidden sm:block">Real-time Monitoring System</p>
+                <p className="text-xs text-muted-foreground hidden sm:block">
+                  {connectionStatus.isInitialized ? 'Real-time Monitoring System' : 'Initializing...'}
+                </p>
               </div>
             </div>
 
             {/* Center: Status Indicators (hidden on mobile) */}
             <div className="hidden lg:flex items-center gap-4">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/20 rounded-full border border-green-200 dark:border-green-800">
-                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs font-medium text-green-700 dark:text-green-300">System Online</span>
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
+                connectionStatus.supabase.isConnected 
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' 
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+              }`}>
+                <div className={`h-2 w-2 rounded-full ${
+                  connectionStatus.supabase.isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                }`}></div>
+                <span className={`text-xs font-medium ${
+                  connectionStatus.supabase.isConnected 
+                    ? 'text-green-700 dark:text-green-300' 
+                    : 'text-red-700 dark:text-red-300'
+                }`}>
+                  {connectionStatus.supabase.isConnected ? 'System Online' : 'System Offline'}
+                </span>
               </div>
               <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded-full border border-blue-200 dark:border-blue-800">
                 <Bell className="h-3 w-3 text-blue-600" />
@@ -452,9 +452,21 @@ const Dashboard: React.FC = () => {
 
                 {/* Status Indicators */}
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-sm font-medium text-green-700 dark:text-green-300">System Online</span>
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
+                    connectionStatus.supabase.isConnected 
+                      ? 'bg-green-50 dark:bg-green-900/20' 
+                      : 'bg-red-50 dark:bg-red-900/20'
+                  }`}>
+                    <div className={`h-2 w-2 rounded-full ${
+                      connectionStatus.supabase.isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                    }`}></div>
+                    <span className={`text-sm font-medium ${
+                      connectionStatus.supabase.isConnected 
+                        ? 'text-green-700 dark:text-green-300' 
+                        : 'text-red-700 dark:text-red-300'
+                    }`}>
+                      {connectionStatus.supabase.isConnected ? 'System Online' : 'System Offline'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                     <Bell className="h-4 w-4 text-blue-600" />
@@ -529,6 +541,44 @@ const Dashboard: React.FC = () => {
                 </Link>
               </CardContent>
             </Card>
+
+            {/* Connection Status Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle>System Status</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${
+                      connectionStatus.isInitialized ? 'bg-green-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-sm">Service: {connectionStatus.isInitialized ? 'Ready' : 'Initializing'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${
+                      connectionStatus.supabase.isConnected ? 'bg-green-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-sm">Database: {connectionStatus.supabase.isConnected ? 'Connected' : 'Disconnected'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${
+                      connectionStatus.push.supported ? 'bg-green-500' : 'bg-gray-400'
+                    }`}></div>
+                    <span className="text-sm">Push: {connectionStatus.push.supported ? 'Supported' : 'Not Supported'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${
+                      connectionStatus.push.pushSubscribed ? 'bg-green-500' : 'bg-yellow-500'
+                    }`}></div>
+                    <span className="text-sm">Subscription: {connectionStatus.push.pushSubscribed ? 'Active' : 'Inactive'}</span>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  In-App Listeners: {connectionStatus.listeners.inApp} | Push Listeners: {connectionStatus.listeners.push}
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Right Column */}
@@ -600,6 +650,7 @@ const Dashboard: React.FC = () => {
                       <SelectItem value="low">Low</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -638,7 +689,7 @@ const Dashboard: React.FC = () => {
                           <div 
                             key={n.id} 
                             className={`p-4 rounded-lg border transition-all duration-200 ${
-                              !n.acknowledged 
+                              !n.is_read 
                                 ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-100 border-l-4 border-l-blue-500' 
                                 : 'bg-muted/30 border-border'
                             }`}
@@ -646,7 +697,7 @@ const Dashboard: React.FC = () => {
                             <div className="flex items-start justify-between mb-2">
                               <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <div className="font-semibold text-sm truncate">{n.title}</div>
-                                {!n.acknowledged && (
+                                {!n.is_read && (
                                   <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 font-medium flex-shrink-0">
                                     New
                                   </Badge>
@@ -654,12 +705,15 @@ const Dashboard: React.FC = () => {
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <Badge 
-                                  variant={n.priority === 'high' ? 'destructive' : n.priority === 'medium' ? 'secondary' : 'outline'}
+                                  variant={
+                                    n.priority === 'urgent' || n.priority === 'high' ? 'destructive' : 
+                                    n.priority === 'medium' ? 'secondary' : 'outline'
+                                  }
                                   className="text-xs"
                                 >
                                   {n.priority || 'medium'}
                                 </Badge>
-                                {!n.acknowledged && (
+                                {!n.is_read && (
                                   <Button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -674,10 +728,12 @@ const Dashboard: React.FC = () => {
                                 )}
                               </div>
                             </div>
-                            <div className="text-sm text-foreground/80 mb-2 leading-relaxed">{n.body}</div>
+                            <div className="text-sm text-foreground/80 mb-2 leading-relaxed">
+                              {n.message || n.body || 'No message'}
+                            </div>
                             <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
                               {new Date(n.created_at).toLocaleString()}
-                              {n.acknowledged && (
+                              {n.is_read && (
                                 <span className="flex items-center gap-1 text-green-600 font-medium">
                                   <Check className="h-3 w-3" />
                                   Read
@@ -699,7 +755,7 @@ const Dashboard: React.FC = () => {
                 <CardTitle className="text-center">🔔 Notification Controls</CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2 mb-4">
                   <Button 
                     variant="outline" 
                     size="sm" 
@@ -718,6 +774,8 @@ const Dashboard: React.FC = () => {
                   >
                     Medium Priority
                   </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <Button 
                     variant="destructive" 
                     size="sm" 
@@ -727,10 +785,24 @@ const Dashboard: React.FC = () => {
                   >
                     High Priority
                   </Button>
+                  <Button 
+                    variant="destructive" 
+                    size="sm" 
+                    onClick={() => sendTestNotification('urgent')} 
+                    className="text-xs bg-red-600 hover:bg-red-700"
+                    disabled={isLoading}
+                  >
+                    Urgent Priority
+                  </Button>
                 </div>
                 {!notificationsEnabled && (
                   <p className="text-xs text-muted-foreground mt-3 text-center">
                     Click any button to enable browser notifications
+                  </p>
+                )}
+                {!connectionStatus.isInitialized && (
+                  <p className="text-xs text-yellow-600 mt-2 text-center">
+                    Notification service is still initializing...
                   </p>
                 )}
               </CardContent>
