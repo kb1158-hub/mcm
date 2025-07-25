@@ -8,7 +8,6 @@ import { toast } from '@/components/ui/sonner';
 import { pushService } from '@/services/pushNotificationService';
 import { realTimeNotificationService } from '@/services/realTimeNotificationService';
 
-
 interface DisplayNotification extends RealTimeNotification {
   isVisible: boolean;
   dismissedAt?: number;
