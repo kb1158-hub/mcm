@@ -1,11 +1,13 @@
 // mcm-alert-central/src/services/realTimeNotificationService.ts
 import { supabase } from '../supabaseClient';
-import { RealtimeChannel } from '@supabase/supabase-js'; // Keep RealtimeChannel if you use its methods/types
+import { RealtimeChannel } from '@supabase/supabase-js'; 
 
 type Listener = (notification: RealTimeNotification) => void;
 
 let channel: RealtimeChannel | null = null;
 let activeListener: Listener | null = null;
+// Track the last known successful status, or 'disconnected' initially
+let lastChannelStatus: string = 'disconnected'; 
 
 // New state variables for reconnection management
 let reconnectAttempts = 0;
@@ -53,27 +55,29 @@ function subscribeToChannel(userId: string) {
                 }
                 reconnectAttempts = 0; // Reset attempts on successful data reception
                 clearTimeout(reconnectTimeoutId); // Clear any pending reconnects
+                lastChannelStatus = 'SUBSCRIBED'; // Update status on successful data
             }
         )
         .subscribe((status, err) => { // Added 'err' parameter here!
             console.log('[RTService] Supabase channel status:', status);
+            lastChannelStatus = status; // Always update the last known status
+
             if (err) {
-                console.error('[RTService] Supabase channel error details:', err); // Log the error!
+                // IMPORTANT: If err is an object, stringify it to see full details
+                console.error('[RTService] Supabase channel error details:', JSON.stringify(err, null, 2)); 
             }
 
-            // Use string literals for status comparison
             if (status === 'SUBSCRIBED') {
                 console.log('[RTService] Successfully subscribed to channel!');
                 reconnectAttempts = 0; // Reset attempts on successful subscription
                 clearTimeout(reconnectTimeoutId); // Clear any pending reconnects
             } else if (
-                status === 'CHANNEL_ERROR' || // Use string literal
-                status === 'CLOSED' ||        // Use string literal
-                status === 'TIMED_OUT'        // Use string literal
+                status === 'CHANNEL_ERROR' || 
+                status === 'CLOSED' ||        
+                status === 'TIMED_OUT'        
             ) {
                 console.warn(`[RTService] Channel disconnected or errored: ${status}. Attempting to reconnect...`);
                 
-                // Clear any existing reconnect timeout to prevent multiple
                 clearTimeout(reconnectTimeoutId); 
 
                 if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -84,15 +88,10 @@ function subscribeToChannel(userId: string) {
 
                     reconnectTimeoutId = setTimeout(() => {
                         console.log(`[RTService] Executing reconnect attempt ${reconnectAttempts}...`);
-                        // Call initialize again to re-attempt the subscription
-                        // Ensure initialize can handle being called multiple times gracefully
-                        realTimeNotificationService.initialize(userId);
+                        realTimeNotificationService.initialize(userId); // Re-initialize
                     }, actualDelay);
                 } else {
                     console.error('[RTService] Max reconnection attempts reached. Giving up on Realtime notifications.');
-                    // Optionally, inform the user or log to an error tracking service (e.g., Sentry)
-                    // You might also want to call realTimeNotificationService.disconnect() here
-                    // to explicitly clean up resources if you're truly giving up.
                 }
             }
         });
@@ -106,18 +105,16 @@ export const realTimeNotificationService = {
             return;
         }
 
-        // Only proceed if a channel is not currently attempting to subscribe or is already subscribed
-        const currentChannelStatus = channel?.status(); // Get current status string from the channel object
-        
-        // if channel exists and is explicitly 'SUBSCRIBED' or 'JOINING' (if you consider joining as connected)
-        if (channel && (currentChannelStatus === 'SUBSCRIBED' || currentChannelStatus === 'JOINING')) { 
+        // Use the `lastChannelStatus` to check if already connected,
+        // as `channel.status()` seems to be problematic.
+        // If `channel` exists and the last known status was 'SUBSCRIBED'
+        // or 'JOINING' (which means it's actively trying to connect/already connected)
+        if (channel && (lastChannelStatus === 'SUBSCRIBED' || lastChannelStatus === 'JOINING')) { 
             console.log('[RTService] Already initialized and connected');
             return;
         }
         
-        // If it's not connected, or channel is null, proceed to subscribe
         console.log('[RTService] Initializing Realtime service...');
-        // Clear any previous reconnection timeouts if a new explicit initialize call is made
         clearTimeout(reconnectTimeoutId); 
         reconnectAttempts = 0; // Reset attempts for a fresh start
 
@@ -132,15 +129,14 @@ export const realTimeNotificationService = {
     },
 
     getConnectionStatus() {
-        const currentChannelStatus = channel?.status(); // Get current status from the channel object
-        const isConnected = currentChannelStatus === 'SUBSCRIBED'; // Consider only 'SUBSCRIBED' as truly connected
+        // Report status based on the `lastChannelStatus` variable
+        const isConnected = lastChannelStatus === 'SUBSCRIBED';
         
-        // Return more detailed status if channel exists
         return {
             isConnected: isConnected,
             connectionType: 'supabase',
-            channelStatus: currentChannelStatus || 'disconnected', // Add current channel status
-            reconnectAttempts: reconnectAttempts // Add reconnect attempt count
+            channelStatus: lastChannelStatus, // Report the last known status
+            reconnectAttempts: reconnectAttempts 
         };
     },
 
@@ -151,7 +147,8 @@ export const realTimeNotificationService = {
             channel = null;
         }
         activeListener = null;
-        clearTimeout(reconnectTimeoutId); // Clear any pending reconnects
-        reconnectAttempts = 0; // Reset attempts
+        clearTimeout(reconnectTimeoutId); 
+        reconnectAttempts = 0; 
+        lastChannelStatus = 'disconnected'; // Reset status on explicit disconnect
     }
 };
