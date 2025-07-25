@@ -1,6 +1,6 @@
 // mcm-alert-central/src/services/realTimeNotificationService.ts
 import { supabase } from '../supabaseClient';
-import { RealtimeChannel, RealtimeChannelState, RealtimeChannelStatus } from '@supabase/supabase-js';
+import { RealtimeChannel } from '@supabase/supabase-js'; // Keep RealtimeChannel if you use its methods/types
 
 type Listener = (notification: RealTimeNotification) => void;
 
@@ -61,14 +61,15 @@ function subscribeToChannel(userId: string) {
                 console.error('[RTService] Supabase channel error details:', err); // Log the error!
             }
 
+            // Use string literals for status comparison
             if (status === 'SUBSCRIBED') {
                 console.log('[RTService] Successfully subscribed to channel!');
                 reconnectAttempts = 0; // Reset attempts on successful subscription
                 clearTimeout(reconnectTimeoutId); // Clear any pending reconnects
             } else if (
-                status === RealtimeChannelStatus.ChannelError || // 'CHANNEL_ERROR'
-                status === RealtimeChannelStatus.Closed ||      // 'CLOSED'
-                status === RealtimeChannelStatus.TimedOut       // 'TIMED_OUT'
+                status === 'CHANNEL_ERROR' || // Use string literal
+                status === 'CLOSED' ||        // Use string literal
+                status === 'TIMED_OUT'        // Use string literal
             ) {
                 console.warn(`[RTService] Channel disconnected or errored: ${status}. Attempting to reconnect...`);
                 
@@ -106,11 +107,10 @@ export const realTimeNotificationService = {
         }
 
         // Only proceed if a channel is not currently attempting to subscribe or is already subscribed
-        // The previous `if (channel)` check only saw if the variable was set.
-        // We need to know if it's actually in a connected state.
-        // The `getConnectionStatus().isConnected` check is better for this.
-        const currentStatus = realTimeNotificationService.getConnectionStatus();
-        if (channel && currentStatus.isConnected) { // if channel exists and is connected
+        const currentChannelStatus = channel?.status(); // Get current status string from the channel object
+        
+        // if channel exists and is explicitly 'SUBSCRIBED' or 'JOINING' (if you consider joining as connected)
+        if (channel && (currentChannelStatus === 'SUBSCRIBED' || currentChannelStatus === 'JOINING')) { 
             console.log('[RTService] Already initialized and connected');
             return;
         }
@@ -132,15 +132,14 @@ export const realTimeNotificationService = {
     },
 
     getConnectionStatus() {
-        const isConnected = channel?.status === RealtimeChannelStatus.Subscribed;
-        // Or if you want to be more nuanced, check for 'joining' too
-        // const isConnected = channel?.status === RealtimeChannelStatus.Subscribed || channel?.status === RealtimeChannelStatus.Joining;
+        const currentChannelStatus = channel?.status(); // Get current status from the channel object
+        const isConnected = currentChannelStatus === 'SUBSCRIBED'; // Consider only 'SUBSCRIBED' as truly connected
         
         // Return more detailed status if channel exists
         return {
             isConnected: isConnected,
             connectionType: 'supabase',
-            channelStatus: channel ? channel.status : 'disconnected', // Add current channel status
+            channelStatus: currentChannelStatus || 'disconnected', // Add current channel status
             reconnectAttempts: reconnectAttempts // Add reconnect attempt count
         };
     },
