@@ -6,14 +6,12 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'service-worker.js',
-      strategies: 'injectManifest',
       registerType: 'autoUpdate',
       injectManifest: {
         swSrc: 'src/service-worker.js',
-        swDest: 'dist/service-worker.js',
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
       },
       devOptions: {
         enabled: true
