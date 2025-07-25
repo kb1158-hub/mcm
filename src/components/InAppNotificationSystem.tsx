@@ -5,7 +5,6 @@ import { X, Bell, Wifi, WifiOff, AlertCircle, CheckCircle, Info } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
-import { realTimeNotificationService, RealTimeNotification } from '@/services/realTimeNotificationService';
 import { pushService } from '@/services/pushNotificationService';
 
 interface DisplayNotification extends RealTimeNotification {
@@ -205,16 +204,6 @@ const InAppNotificationSystem: React.FC = () => {
     setTimeout(() => {
       setNotifications([]);
     }, 300);
-  };
-
-  const sendTestRealTimeNotification = async () => {
-    try {
-      await realTimeNotificationService.sendTestNotification('medium');
-      toast.success('Test notification sent!');
-    } catch (error) {
-      console.error('Failed to send test notification:', error);
-      toast.error('Failed to send test notification. Check your connection.');
-    }
   };
 
   const getNotificationIcon = (type: string, priority: string) => {
