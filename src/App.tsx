@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useSupabaseNotifications } from './services/supabaseNotificationService';
 import { registerServiceWorker, showBrowserNotification } from './services/pushNotificationService';
 
-const VAPID_PUBLIC_KEY = '<YOUR_VAPID_PUBLIC_KEY>';
+const VAPID_PUBLIC_KEY = 'BCk21-ioklyur883nJg0PbBZxhkOvVzvmUzASZHLwHTW6qQjnkNdjo0GU23LycsD9Om27Ihx8qXfDEGqFqaePDc';
 
 function App() {
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [userId] = useState('<CURRENT_USER_ID>'); // Replace with your auth/user context
+  const [userId] = useState('1'); // Replace with your auth/user context
 
   const playSound = () => {
     const audio = new Audio('/notification.mp3'); // Place your sound file in public/
