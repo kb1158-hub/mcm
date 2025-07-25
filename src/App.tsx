@@ -1,84 +1,49 @@
 // src/App.tsx
-import React, { useEffect } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AuthProvider } from "@/contexts/AuthContext";
-// CHANGE: Replace old pushService with new Supabase service
-import { notificationService } from "@/services/supabaseNotificationService";
-import InAppNotificationSystem from "@/components/InAppNotificationSystem";
+import { useEffect, useRef, useState } from 'react';
+import { useSupabaseNotifications } from './services/supabaseNotificationService';
+import { registerServiceWorker, showBrowserNotification } from './services/pushNotificationService';
 
-// Page Components
-import Index from "./pages/Index";
-import ApiDocumentation from "./pages/ApiDocumentation";
-import NotFound from "./pages/NotFound";
-import AllNotifications from "./pages/AllNotifications";
+const VAPID_PUBLIC_KEY = '<YOUR_VAPID_PUBLIC_KEY>';
 
-const queryClient = new QueryClient();
+function App() {
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [userId] = useState('<CURRENT_USER_ID>'); // Replace with your auth/user context
 
-const App: React.FC = () => {
+  const playSound = () => {
+    const audio = new Audio('/notification.mp3'); // Place your sound file in public/
+    audio.play();
+  };
+
   useEffect(() => {
-    const initializeNotificationService = async () => {
-      try {
-        // Request notification permission first
-        const hasPermission = await notificationService.requestPermission();
-        if (hasPermission) {
-          console.log("Notification permission granted");
-        } else {
-          console.warn("Notification permission denied");
-        }
-
-        // Initialize real-time subscription regardless of permission
-        await notificationService.initialize();
-        console.log("Supabase notification service initialized");
-
-        // Add a listener to log notifications (optional)
-        const removeListener = notificationService.addListener((notification) => {
-          console.log("New notification received:", notification);
-          // You can add additional handling here like showing toasts
-        });
-
-        // Return cleanup function
-        return () => {
-          removeListener();
-          notificationService.disconnect();
-        };
-      } catch (error) {
-        console.error("Failed to initialize notification service:", error);
-      }
-    };
-
-    initializeNotificationService();
-
-    // Cleanup on component unmount
-    return () => {
-      notificationService.disconnect();
-    };
+    registerServiceWorker();
   }, []);
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/api-docs" element={<ApiDocumentation />} />
-              <Route path="/notifications" element={<AllNotifications />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+  useSupabaseNotifications(userId, notification => {
+    setNotifications(prev => [notification, ...prev]);
+    playSound();
+    if (Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+      showBrowserNotification({
+        title: notification.title || 'New Notification',
+        body: notification.body || '',
+        url: notification.url
+      });
+    }
+  });
 
-            {/* In-App Notification System */}
-            <InAppNotificationSystem />
-          </BrowserRouter>
-        </TooltipProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+  return (
+    <div>
+      <h1>Notifications Center</h1>
+      <ul>
+        {notifications.map(notif => (
+          <li key={notif.id}>
+            <strong>{notif.title}</strong>
+            <p>{notif.body}</p>
+          </li>
+        ))}
+      </ul>
+      {/* You can add NotificationSettingsDialog here if desired */}
+    </div>
   );
-};
+}
 
 export default App;
