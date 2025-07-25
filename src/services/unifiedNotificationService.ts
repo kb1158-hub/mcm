@@ -1,11 +1,55 @@
 // src/services/unifiedNotificationService.ts
 import { createClient } from '@supabase/supabase-js'
 
-// ✅ Fixed: Use import.meta.env for Vite
-const supabase = createClient(
-  import.meta.env.VITE_APP_SUPABASE_URL!,
-  import.meta.env.VITE_APP_SUPABASE_ANON_KEY!
-)
+// ✅ Enhanced environment variable handling with fallbacks and validation
+const getSupabaseConfig = () => {
+  // Try different environment variable patterns
+  const supabaseUrl = 
+    import.meta.env?.VITE_APP_SUPABASE_URL ||
+    import.meta.env?.VITE_SUPABASE_URL ||
+    process.env?.VITE_APP_SUPABASE_URL ||
+    process.env?.VITE_SUPABASE_URL ||
+    process.env?.REACT_APP_SUPABASE_URL ||
+    ''
+
+  const supabaseAnonKey = 
+    import.meta.env?.VITE_APP_SUPABASE_ANON_KEY ||
+    import.meta.env?.VITE_SUPABASE_ANON_KEY ||
+    process.env?.VITE_APP_SUPABASE_ANON_KEY ||
+    process.env?.VITE_SUPABASE_ANON_KEY ||
+    process.env?.REACT_APP_SUPABASE_ANON_KEY ||
+    ''
+
+  console.log('Supabase Config Check:', {
+    hasUrl: !!supabaseUrl,
+    hasKey: !!supabaseAnonKey,
+    urlPrefix: supabaseUrl ? supabaseUrl.substring(0, 20) + '...' : 'missing',
+    keyPrefix: supabaseAnonKey ? supabaseAnonKey.substring(0, 20) + '...' : 'missing',
+    envVars: Object.keys(import.meta.env || {}).filter(key => key.includes('SUPABASE'))
+  })
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.warn('Supabase configuration missing. Available env vars:', Object.keys(import.meta.env || {}))
+    return null
+  }
+
+  return { supabaseUrl, supabaseAnonKey }
+}
+
+// Initialize Supabase client with error handling
+let supabase: any = null
+const supabaseConfig = getSupabaseConfig()
+
+if (supabaseConfig) {
+  try {
+    supabase = createClient(supabaseConfig.supabaseUrl, supabaseConfig.supabaseAnonKey)
+    console.log('Supabase client initialized successfully')
+  } catch (error) {
+    console.error('Failed to initialize Supabase client:', error)
+  }
+} else {
+  console.warn('Supabase not configured - notifications will work in local-only mode')
+}
 
 export interface UnifiedNotification {
   id: string
@@ -37,6 +81,7 @@ export class UnifiedNotificationService {
   private supabaseRetryCount = 0
   private maxRetries = 5
   private retryTimeout: NodeJS.Timeout | null = null
+  private isSupabaseAvailable = !!supabase
 
   // Service Worker for push notifications
   private serviceWorkerRegistration: ServiceWorkerRegistration | null = null
@@ -51,6 +96,9 @@ export class UnifiedNotificationService {
   private isInitialized = false
   private isStackBlitz = false
   private connectionState: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected'
+
+  // Local storage for notifications when Supabase is not available
+  private localNotifications: UnifiedNotification[] = []
 
   constructor() {
     this.isStackBlitz = window.location.hostname.includes('stackblitz') ||
@@ -74,20 +122,32 @@ export class UnifiedNotificationService {
     
     try {
       // Initialize both in-app and push notifications in parallel
-      await Promise.all([
-        this.initializeInAppNotifications(),
-        this.initializePushNotifications()
-      ])
+      const initPromises = [this.initializePushNotifications()]
+      
+      // Only initialize Supabase if it's available
+      if (this.isSupabaseAvailable) {
+        initPromises.push(this.initializeInAppNotifications())
+      } else {
+        console.warn('[UnifiedNotificationService] Supabase not available - using local-only mode')
+        this.connectionState = 'error'
+      }
+
+      await Promise.allSettled(initPromises)
 
       this.isInitialized = true
-      console.log('[UnifiedNotificationService] Successfully initialized both in-app and push notifications')
+      console.log('[UnifiedNotificationService] Successfully initialized notification service')
     } catch (error) {
       console.error('[UnifiedNotificationService] Initialization failed:', error)
-      throw error
+      // Don't throw error - allow service to work in degraded mode
     }
   }
 
   private async initializeInAppNotifications() {
+    if (!this.isSupabaseAvailable) {
+      console.warn('[UnifiedNotificationService] Skipping Supabase initialization - not configured')
+      return
+    }
+
     console.log('[UnifiedNotificationService] Initializing in-app notifications via Supabase...')
     this.connectionState = 'connecting'
     
@@ -216,6 +276,12 @@ export class UnifiedNotificationService {
   private handleInAppNotification(notification: UnifiedNotification) {
     console.log('[UnifiedNotificationService] Processing in-app notification:', notification)
     
+    // Store locally
+    this.localNotifications.unshift(notification)
+    if (this.localNotifications.length > 100) {
+      this.localNotifications = this.localNotifications.slice(0, 100)
+    }
+    
     // Notify in-app listeners
     this.inAppListeners.forEach(listener => {
       try {
@@ -249,6 +315,9 @@ export class UnifiedNotificationService {
       }
       
       console.log('[UnifiedNotificationService] Received push notification:', notification)
+      
+      // Store locally
+      this.localNotifications.unshift(notification)
       
       // Notify push listeners
       this.pushListeners.forEach(listener => {
@@ -431,6 +500,15 @@ export class UnifiedNotificationService {
   // ===========================================
 
   async getNotifications(limit = 50, offset = 0, unreadOnly = false) {
+    if (!this.isSupabaseAvailable) {
+      // Return local notifications
+      let filtered = [...this.localNotifications]
+      if (unreadOnly) {
+        filtered = filtered.filter(n => !n.is_read)
+      }
+      return filtered.slice(offset, offset + limit)
+    }
+
     try {
       let query = supabase
         .from('notifications')
@@ -452,6 +530,18 @@ export class UnifiedNotificationService {
   }
 
   async markAsRead(notificationId: string) {
+    // Update local storage
+    const localIndex = this.localNotifications.findIndex(n => n.id === notificationId)
+    if (localIndex !== -1) {
+      this.localNotifications[localIndex].is_read = true
+      this.localNotifications[localIndex].acknowledged = true
+    }
+
+    if (!this.isSupabaseAvailable) {
+      console.log('[UnifiedNotificationService] Marked notification as read locally:', notificationId)
+      return
+    }
+
     try {
       const { error } = await supabase
         .from('notifications')
@@ -470,6 +560,17 @@ export class UnifiedNotificationService {
   }
 
   async markAllAsRead() {
+    // Update local storage
+    this.localNotifications.forEach(n => {
+      n.is_read = true
+      n.acknowledged = true
+    })
+
+    if (!this.isSupabaseAvailable) {
+      console.log('[UnifiedNotificationService] Marked all notifications as read locally')
+      return
+    }
+
     try {
       const { error } = await supabase
         .from('notifications')
@@ -488,6 +589,10 @@ export class UnifiedNotificationService {
   }
 
   async getUnreadCount() {
+    if (!this.isSupabaseAvailable) {
+      return this.localNotifications.filter(n => !n.is_read).length
+    }
+
     try {
       const { count, error } = await supabase
         .from('notifications')
@@ -511,34 +616,49 @@ export class UnifiedNotificationService {
     testPush = false
   ) {
     try {
-      const notification = {
+      const notification: UnifiedNotification = {
+        id: `test-${Date.now()}`,
         title: `Test Notification - ${priority.toUpperCase()}`,
         message: `This is a unified test notification with ${priority} priority sent at ${new Date().toLocaleTimeString()}`,
         body: `Testing both in-app and push notifications`,
         type: 'test',
         priority,
         site: 'system',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        is_read: false,
+        acknowledged: false
       }
 
       if (testPush && this.pushSubscription) {
         // Send push notification via backend
-        await fetch('/api/push-test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notification, subscription: this.pushSubscription })
-        })
+        try {
+          await fetch('/api/push-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notification, subscription: this.pushSubscription })
+          })
+        } catch (error) {
+          console.warn('[UnifiedNotificationService] Push test failed:', error)
+        }
       }
 
-      // Create in database (will trigger real-time notification)
-      const { data, error } = await supabase
-        .from('notifications')
-        .insert([notification])
-        .select()
+      if (this.isSupabaseAvailable) {
+        // Create in database (will trigger real-time notification)
+        const { data, error } = await supabase
+          .from('notifications')
+          .insert([notification])
+          .select()
 
-      if (error) throw error
-      console.log('[UnifiedNotificationService] Test notification created:', data[0])
-      return data[0]
+        if (error) throw error
+        console.log('[UnifiedNotificationService] Test notification created in database:', data[0])
+        return data[0]
+      } else {
+        // Handle locally
+        this.handleInAppNotification(notification)
+        console.log('[UnifiedNotificationService] Test notification created locally:', notification)
+        return notification
+      }
     } catch (error) {
       console.error('[UnifiedNotificationService] Failed to send test notification:', error)
       throw error
@@ -573,7 +693,7 @@ export class UnifiedNotificationService {
   }
 
   private cleanupSupabase() {
-    if (this.supabaseSubscription) {
+    if (this.supabaseSubscription && this.isSupabaseAvailable) {
       supabase.removeChannel(this.supabaseSubscription)
       this.supabaseSubscription = null
     }
@@ -607,7 +727,8 @@ export class UnifiedNotificationService {
       supabase: {
         isConnected: this.isSupabaseConnected,
         connectionState: this.connectionState,
-        retryCount: this.supabaseRetryCount
+        retryCount: this.supabaseRetryCount,
+        isAvailable: this.isSupabaseAvailable
       },
       push: {
         serviceWorkerRegistered: !!this.serviceWorkerRegistration,
@@ -617,7 +738,8 @@ export class UnifiedNotificationService {
       listeners: {
         inApp: this.inAppListeners.length,
         push: this.pushListeners.length
-      }
+      },
+      localNotifications: this.localNotifications.length
     }
   }
 
