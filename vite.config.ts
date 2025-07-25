@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react-swc'; // <-- fix here
+import react from '@vitejs/plugin-react-swc';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
@@ -10,6 +10,11 @@ export default defineConfig({
       filename: 'service-worker.js',
       strategies: 'injectManifest',
       registerType: 'autoUpdate',
+      injectManifest: {
+        swSrc: 'src/service-worker.js',
+        swDest: 'dist/service-worker.js',
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+      },
       devOptions: {
         enabled: true
       }
