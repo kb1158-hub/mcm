@@ -8,10 +8,23 @@ import { toast } from '@/components/ui/sonner';
 import { pushService } from '@/services/pushNotificationService';
 import { realTimeNotificationService } from '@/services/realTimeNotificationService';
 
+interface RealTimeNotification {
+  id: string;
+  type: string;
+  priority: 'low' | 'medium' | 'high';
+  title: string;
+  message: string;
+  timestamp: string;
+  data?: any;
+}
+
 interface DisplayNotification extends RealTimeNotification {
   isVisible: boolean;
   dismissedAt?: number;
 }
+
+// Static user with id '1'
+const user = { id: '1' };
 
 const InAppNotificationSystem: React.FC = () => {
   const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
@@ -34,7 +47,7 @@ const InAppNotificationSystem: React.FC = () => {
         await pushService.initialize();
         console.log('Push service initialized');
 
-        // Initialize real-time notification service with user ID
+        // Initialize real-time notification service with static user id
         if (user?.id) {
           await realTimeNotificationService.initialize(user.id);
           console.log('Real-time notification service initialized');
@@ -127,7 +140,7 @@ const InAppNotificationSystem: React.FC = () => {
         audioContext.close();
       }
     };
-  }, [user?.id, audioContext]);
+  }, [audioContext]);
 
   const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
     if (!audioContext) return;
@@ -296,19 +309,20 @@ const InAppNotificationSystem: React.FC = () => {
                         {notification.priority.toUpperCase()}
                       </Badge>
                     </div>
-                    <p className="text-sm text-gray-700 leading-5 break-words">
-                      {notification.message}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-sm text-gray-700 truncate">{notification.message}</p>
+                    <time className="text-xs text-gray-500 mt-1 block">
                       {new Date(notification.timestamp).toLocaleTimeString()}
-                    </p>
+                    </time>
                   </div>
                 </div>
+
+                {/* Dismiss Button */}
                 <Button
-                  onClick={() => dismissNotification(notification.id)}
-                  variant="ghost"
                   size="sm"
-                  className="h-6 w-6 p-0 flex-shrink-0 hover:bg-white/50"
+                  variant="ghost"
+                  aria-label="Dismiss notification"
+                  onClick={() => dismissNotification(notification.id)}
+                  className="ml-2 text-gray-400 hover:text-gray-600 p-1"
                 >
                   <X className="h-4 w-4" />
                 </Button>
