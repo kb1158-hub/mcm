@@ -1,4 +1,4 @@
-// Create/Update this file: src/components/InAppNotificationSystem.tsx
+// src/components/InAppNotificationSystem.tsx
 
 import React, { useEffect, useState } from 'react';
 import { X, Bell, Wifi, WifiOff, AlertCircle, CheckCircle, Info } from 'lucide-react';
@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
 import { pushService } from '@/services/pushNotificationService';
+import { realTimeNotificationService } from '@/services/realTimeNotificationService';
+import { useUser } from '@supabase/auth-helpers-react'; // or your user hook
 
 interface DisplayNotification extends RealTimeNotification {
   isVisible: boolean;
@@ -13,6 +15,7 @@ interface DisplayNotification extends RealTimeNotification {
 }
 
 const InAppNotificationSystem: React.FC = () => {
+  const user = useUser(); // Get logged-in user
   const [notifications, setNotifications] = useState<DisplayNotification[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionType, setConnectionType] = useState<string>('disconnected');
@@ -27,33 +30,33 @@ const InAppNotificationSystem: React.FC = () => {
       console.warn('Audio context not supported:', error);
     }
 
-    // Initialize real-time notification service
     const initializeServices = async () => {
       try {
         // Initialize push notification service
         await pushService.initialize();
         console.log('Push service initialized');
 
-        // Initialize real-time notification service
-        await realTimeNotificationService.initialize();
-        console.log('Real-time notification service initialized');
+        // Initialize real-time notification service with user ID
+        if (user?.id) {
+          await realTimeNotificationService.initialize(user.id);
+          console.log('Real-time notification service initialized');
+        } else {
+          console.warn('User not logged in, skipping real-time notifications initialization');
+        }
 
         // Set up real-time notification listener
         const unsubscribe = realTimeNotificationService.addListener((notification) => {
           console.log('Received real-time notification:', notification);
-          
-          // Add to display notifications
+
           const displayNotification: DisplayNotification = {
             ...notification,
-            isVisible: true
+            isVisible: true,
           };
-          
+
           setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]); // Keep max 5
-          
-          // Play notification sound
+
           playNotificationSound(notification.priority);
-          
-          // Show toast notification
+
           const toastMessage = `${notification.title}: ${notification.message}`;
           switch (notification.priority) {
             case 'high':
@@ -101,15 +104,14 @@ const InAppNotificationSystem: React.FC = () => {
           data: notificationData.data
         };
 
-        // Add to display notifications
         const displayNotification: DisplayNotification = {
           ...realTimeNotification,
-          isVisible: true
+          isVisible: true,
         };
-        
+
         setNotifications(prev => [displayNotification, ...prev.slice(0, 4)]);
         playNotificationSound(realTimeNotification.priority);
-        
+
         console.log('Received push notification from service worker:', realTimeNotification);
       }
     };
@@ -118,7 +120,6 @@ const InAppNotificationSystem: React.FC = () => {
       navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
     }
 
-    // Cleanup
     return () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
@@ -128,7 +129,7 @@ const InAppNotificationSystem: React.FC = () => {
         audioContext.close();
       }
     };
-  }, []);
+  }, [user?.id, audioContext]);
 
   const playNotificationSound = async (priority: 'low' | 'medium' | 'high') => {
     if (!audioContext) return;
@@ -144,7 +145,6 @@ const InAppNotificationSystem: React.FC = () => {
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
 
-      // Different frequencies for different priorities
       const frequency = priority === 'high' ? 800 : priority === 'medium' ? 600 : 400;
       const duration = priority === 'high' ? 1.0 : 0.5;
 
@@ -158,7 +158,6 @@ const InAppNotificationSystem: React.FC = () => {
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + duration);
 
-      // For high priority, play a second beep
       if (priority === 'high') {
         setTimeout(() => {
           const oscillator2 = audioContext.createOscillator();
@@ -182,22 +181,21 @@ const InAppNotificationSystem: React.FC = () => {
   };
 
   const dismissNotification = (id: string) => {
-    setNotifications(prev => 
-      prev.map(n => 
-        n.id === id 
+    setNotifications(prev =>
+      prev.map(n =>
+        n.id === id
           ? { ...n, isVisible: false, dismissedAt: Date.now() }
           : n
       )
     );
 
-    // Remove after animation
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 300);
   };
 
   const clearAllNotifications = () => {
-    setNotifications(prev => 
+    setNotifications(prev =>
       prev.map(n => ({ ...n, isVisible: false, dismissedAt: Date.now() }))
     );
 
@@ -210,7 +208,7 @@ const InAppNotificationSystem: React.FC = () => {
     if (priority === 'high') {
       return <AlertCircle className="h-5 w-5 text-red-500" />;
     }
-    
+
     switch (type) {
       case 'test':
         return <Bell className="h-5 w-5 text-blue-500" />;
@@ -242,8 +240,8 @@ const InAppNotificationSystem: React.FC = () => {
     <>
       {/* Connection Status Indicator */}
       <div className="fixed top-4 left-4 z-40">
-        <Badge 
-          variant={isConnected ? "default" : "destructive"}
+        <Badge
+          variant={isConnected ? 'default' : 'destructive'}
           className="flex items-center gap-1"
         >
           {isConnected ? (
@@ -255,19 +253,6 @@ const InAppNotificationSystem: React.FC = () => {
         </Badge>
       </div>
 
-      {/* Test Button - Remove in production 
-      <div className="fixed bottom-4 left-4 z-40">
-        <Button
-          onClick={sendTestRealTimeNotification}
-          variant="outline"
-          size="sm"
-          className="bg-white/90 backdrop-blur-sm"
-        >
-          <Bell className="h-4 w-4 mr-2" />
-          Test Real-time
-        </Button>
-      </div>
-      */}
       {/* Notification Container */}
       {visibleNotifications.length > 0 && (
         <div className="fixed top-16 right-4 z-50 space-y-3 max-w-sm">
@@ -292,8 +277,8 @@ const InAppNotificationSystem: React.FC = () => {
               className={`
                 p-4 rounded-lg border transition-all duration-300 ease-in-out
                 ${getPriorityStyles(notification.priority)}
-                ${notification.isVisible 
-                  ? 'animate-in slide-in-from-right-full opacity-100 scale-100' 
+                ${notification.isVisible
+                  ? 'animate-in slide-in-from-right-full opacity-100 scale-100'
                   : 'animate-out slide-out-to-right-full opacity-0 scale-95'
                 }
               `}
@@ -306,7 +291,7 @@ const InAppNotificationSystem: React.FC = () => {
                       <h4 className="font-semibold text-gray-900 text-sm truncate">
                         {notification.title}
                       </h4>
-                      <Badge 
+                      <Badge
                         variant={notification.priority === 'high' ? 'destructive' : 'outline'}
                         className="text-xs flex-shrink-0"
                       >
