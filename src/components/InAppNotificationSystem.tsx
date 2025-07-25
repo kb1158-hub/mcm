@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
 import { pushService } from '@/services/pushNotificationService';
 import { realTimeNotificationService } from '@/services/realTimeNotificationService';
-import { useUser } from '@supabase/auth-helpers-react'; // or your user hook
+
 
 interface DisplayNotification extends RealTimeNotification {
   isVisible: boolean;
