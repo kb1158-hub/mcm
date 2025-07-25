@@ -10,7 +10,7 @@ import Dashboard from '@/pages/Dashboard';
 import AllNotifications from '@/pages/AllNotifications';
 import ApiDocumentation from '@/pages/ApiDocumentation';
 import NotFound from '@/pages/NotFound';
-import { pushService } from '@/services/pushNotificationService';
+import { unifiedNotificationService } from '@/services/unifiedNotificationService';
 import './App.css';
 
 // Create a client for React Query
@@ -32,9 +32,9 @@ function App() {
       try {
         console.log('🚀 Initializing MCM Alerts App...');
         
-        // Initialize push notification service
-        await pushService.initialize();
-        console.log('✅ Push notification service initialized');
+        // Initialize unified notification service (replaces pushService)
+        await unifiedNotificationService.initialize();
+        console.log('✅ Unified notification service initialized');
 
         // Register service worker for PWA functionality
         if ('serviceWorker' in navigator) {
@@ -122,17 +122,27 @@ function App() {
           window.addEventListener('push-notification-received', (event: any) => {
             console.log('🔔 Push notification received in app:', event.detail);
             
-            // Dispatch to push service for handling
-            pushService.showApiNotification(
-              event.detail.title || 'MCM Alert',
-              event.detail.body || event.detail.message || 'New notification received',
-              event.detail.priority || 'medium'
-            );
+            // The unified service already handles these via its internal listeners
+            // Just log for debugging - the service will handle display automatically
           });
 
           // Listen for direct API notifications (when app is open)
           window.addEventListener('api-notification-received', (event: any) => {
             console.log('📡 API notification received:', event.detail);
+            
+            // You can add custom handling here if needed
+            // The unified service handles most cases automatically
+          });
+
+          // Set up unified service listeners for in-app notifications
+          unifiedNotificationService.addInAppListener((notification) => {
+            console.log('🔔 In-app notification:', notification);
+            // Additional custom handling can go here
+          });
+
+          unifiedNotificationService.addPushListener((notification) => {
+            console.log('📱 Push notification:', notification);
+            // Additional custom handling can go here
           });
         };
 
@@ -149,6 +159,9 @@ function App() {
 
     // Cleanup function
     return () => {
+      // Clean up unified notification service
+      unifiedNotificationService.disconnect();
+      
       // Remove event listeners
       window.removeEventListener('online', () => {});
       window.removeEventListener('offline', () => {});
